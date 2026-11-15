@@ -2,7 +2,7 @@
 
 Simulated autonomous landing of a multirotor on a moving platform aboard a moving ship, without GNSS in the final design. Built to learn the ROS 2, ArduPilot and Gazebo stack end to end, with the simulation kept as close to a real system as a desktop setup allows.
 
-**Status: early.** The drone takes off, hovers and lands under the control of a ROS 2 node, and a second node finds a landing marker in the downward camera image and reports where it is. Steering the landing onto the marker, the moving platform, the ship and GNSS-denied navigation are not implemented yet. See the roadmap.
+**Status: early.** The drone takes off, finds a landing marker with its downward camera, flies over it and lands on it, all commanded from ROS 2 nodes. The pad is static and GPS is still on. The moving platform, the ship and GNSS-denied navigation are not implemented yet. See the roadmap.
 
 ## How it works
 
@@ -15,6 +15,15 @@ Simulated autonomous landing of a multirotor on a moving platform aboard a movin
 5. switches to LAND and exits once the drone is on the ground.
 
 Each stage has a timeout. If the drone is airborne when a stage times out, the node commands a landing before exiting with an error.
+
+`land_on_pad` does the same takeoff, then uses the marker to land on the pad:
+
+1. **Search:** hover until the detector reports the marker.
+2. **Align:** fly towards the pad at constant height, with speed proportional to the offset and capped at 1 m/s.
+3. **Descend:** keep centring while coming down, but only while inside a cone that narrows towards the pad; outside it the descent pauses.
+4. **Hand over:** below about 1 m the marker no longer fits in the image, so the autopilot's LAND mode finishes straight down.
+
+If the marker is lost for a few seconds the drone climbs to widen its view, and if it stays lost the landing is abandoned. The decision logic is in `landing_control.py`, again without ROS, and is tested in a closed loop against a simple drone and camera model.
 
 `marker_detector` reads the drone's downward camera, finds the pad's ArUco marker with OpenCV, and publishes the position of the marker centre relative to the camera, in metres. It uses the calibration the simulated camera publishes, and it also publishes the camera image with the detection drawn on it. The detection maths lives in `pad_detection.py`, which has no ROS dependency and its own tests.
 
@@ -38,6 +47,8 @@ The `landing_pad` world is the ArduPilot runway with a 1.25 m pad carrying a 1.0
 - **Built as a ladder.** Each roadmap step is a working demo on its own, so the project is showable at any point rather than only at the end.
 - **ArUco marker, 4x4 dictionary.** The camera is wide-angle and only 640x480, so from 5 m a 1 m marker is about 40 pixels across. A 4x4 marker has the largest cells of the standard dictionaries, which keeps it readable at that size.
 - **The landing controller will live in ROS 2, not in the autopilot.** ArduPilot has built-in precision landing, but it is fed over MAVLink, which the DDS interface does not cover. A controller in ROS 2 is also what the moving platform needs later. Comparing the two is future work.
+- **Velocity commands in the drone's own frame.** The camera is fixed relative to the drone's heading, so "the pad is 2 m ahead" turns directly into "fly forward", with no need to know which way is north. That also keeps the controller independent of GPS-derived position, which matters for the GNSS-denied step.
+- **Logic separated from ROS.** Detection (`pad_detection.py`) and the landing decisions (`landing_control.py`) are plain Python. The ROS nodes only move messages in and out, so the logic can be tested without a simulator.
 - **No `cv_bridge`.** Images are converted to NumPy arrays by hand, which avoids a binary dependency that breaks when the system and pip versions of OpenCV and NumPy differ.
 - **Versions follow ArduPilot's documentation.** Ubuntu 22.04, ROS 2 Humble and Gazebo Harmonic are the combination the ArduPilot guides describe, chosen over newer releases to stay on the supported path.
 
@@ -71,6 +82,8 @@ sudo timedatectl set-ntp false
 **ROS 2 topic and service names change with a parameter.** They are `/ap/v1/...` when the autopilot parameter `DDS_USE_NS` is 1 and `/ap/...` when it is 0. Check with `ros2 service list -t | grep ap/`. After being caught by this, the nodes now look the prefix up when they start.
 
 **The order of the autopilot's defaults files matters.** Adding my own parameter file to the end of the `--defaults` list silently changed `DDS_USE_NS` from 1 to 0, which renamed every topic. Reading ArduPilot's loader (`AP_Param.cpp`) suggests why: it re-reads the defaults later in start-up only if the last file in the list contained parameters it could not place the first time, and the DDS parameters depend on that second read. Keeping a DDS file last, as the upstream launch file does, restored the names. `param show <name>` in MAVProxy shows the value actually in use, and was what exposed this. Two earlier explanations (a start-up race, then saved parameters in `eeprom.bin`) were wrong.
+
+**ArduPilot's body-frame velocity command has +y pointing right.** ROS convention (REP-103), and the comment in ArduPilot's own `AP_DDS_ExternalControl.cpp`, say +y is left. On the first marker-guided flight the drone closed the forward gap correctly while flying away sideways, ending 8.6 m from the pad. The detector's log made the cause obvious: one offset shrinking, the other growing. `flight_base.py` now flips the sign in one documented place.
 
 **Rebuild after editing.** Even with `colcon build --symlink-install`, an edited node kept running its old code until the package was rebuilt.
 
@@ -107,10 +120,22 @@ Terminal 2, the marker detector:
 ros2 run ship_landing marker_detector --ros-args -p use_sim_time:=true
 ```
 
-Terminal 3, once the simulator log shows "EKF3 IMU0 is using GPS": take off and hover for 20 s, then land.
+Terminal 3, once the simulator log shows "EKF3 IMU0 is using GPS": take off and land on the pad.
 
 ```bash
-ros2 run ship_landing takeoff_demo --ros-args -p use_sim_time:=true -p cruise_speed:=0.0 -p cruise_time:=20.0
+ros2 run ship_landing land_on_pad --ros-args -p use_sim_time:=true
+```
+
+To check where it landed, ask Gazebo for the drone's true position; the pad centre is at x = 3, y = 2:
+
+```bash
+gz model -m iris -p
+```
+
+The simpler demo, without the camera, takes off, flies east for 5 s and lands:
+
+```bash
+ros2 run ship_landing takeoff_demo --ros-args -p use_sim_time:=true
 ```
 
 To watch the camera with the detection drawn on it:
@@ -121,36 +146,43 @@ ros2 run rqt_image_view rqt_image_view /landing_pad/debug_image
 
 Optional, for watching autopilot status: `mavproxy.py --console --map --aircraft test --master=:14550`. Add `rviz:=true` to the launch command for RViz; it is off by default because it slows the simulation.
 
-`takeoff_demo` parameters, all optional:
+Parameters, all optional:
 
-| Parameter | Default | Meaning |
-|-----------|---------|---------|
-| `prefix` | found at start-up | Namespace of the ArduPilot DDS topics and services, for example `/ap/v1` |
-| `target_alt` | `5.0` | Takeoff altitude in metres |
-| `cruise_speed` | `1.0` | Commanded speed during the cruise leg, m/s |
-| `cruise_time` | `5.0` | Length of the cruise leg in seconds of simulation time |
+| Node | Parameter | Default | Meaning |
+|------|-----------|---------|---------|
+| both flight nodes | `prefix` | found at start-up | Namespace of the ArduPilot DDS topics and services, for example `/ap/v1` |
+| both flight nodes | `target_alt` | `5.0` | Takeoff altitude in metres |
+| `takeoff_demo` | `cruise_speed` | `1.0` | Speed of the cruise leg, m/s |
+| `takeoff_demo` | `cruise_time` | `5.0` | Length of the cruise leg, seconds of simulation time |
+| `land_on_pad` | `gain` | `0.5` | Horizontal speed per metre of offset, 1/s |
+| `land_on_pad` | `max_speed` | `1.0` | Horizontal speed limit, m/s |
+| `land_on_pad` | `descent_fast`, `descent_slow` | `0.5`, `0.3` | Descent rate above and below 2 m, m/s |
+| `land_on_pad` | `handover_height` | `1.0` | Height at which LAND mode takes over, m |
 
-Example: `ros2 run ship_landing takeoff_demo --ros-args -p use_sim_time:=true -p target_alt:=8.0`
+Example: `ros2 run ship_landing land_on_pad --ros-args -p use_sim_time:=true -p target_alt:=8.0`
 
 `marker_detector` publishes `landing_pad/pose` (`geometry_msgs/PoseStamped`, marker centre in the camera optical frame: x right in the image, y down in the image, z out of the lens) and `landing_pad/debug_image`. With the camera pointing down, image-right was the drone's right and image-up was the drone's forward direction; this was observed at one heading only. Its parameters are `image_topic`, `camera_info_topic`, `marker_size` (metres, default 1.0), `marker_id` (default 0) and `publish_debug_image`.
 
 ### Tests
 
-The detection code is tested against synthetic camera views with a known marker position. No simulator is needed:
+The detection code is tested against synthetic camera views with a known marker position, and the landing logic against a closed-loop model with camera delay, noise, dropped frames and a camera that tilts with the drone. No simulator is needed:
 
 ```bash
 cd ~/ardu_ws/src/drone-ship-landing/ship_landing
-python3 -m pytest test/test_pad_detection.py
+python3 -m pytest test/test_pad_detection.py test/test_landing_control.py
 ```
+
+These tests check the logic. They say little about real accuracy, because the drone model in them is far simpler than the simulator.
 
 ## Known limitations and roadmap
 
 - **Runs slower than real time.** On WSL2 with an RTX 3060 the simulation runs at roughly 0.5 to 0.8 times real time. ArduPilot and Gazebo advance in lockstep, so flight behaviour is unaffected, but it makes every test slower.
 - **GPS is still in use.** The GNSS-denied part of the project starts at step 5.
-- **The cruise leg is open-loop.** The node commands a velocity for a fixed time and does not check where the drone ends up.
-- **The marker is seen but not yet used.** The drone still lands where it took off, not on the pad.
+- **The camera is fixed to the body, not stabilised.** When the drone tilts to accelerate, the pad appears displaced in the image. The controller does not correct for this; it relies on low speeds and on the error shrinking as the drone gets lower. This will not be good enough for a moving platform.
+- **The last metre is flown blind.** Below about 1 m the autopilot's LAND mode takes over and holds position using GPS, so the final accuracy still depends on GPS.
+- **Landing accuracy is not measured yet.** That is step 3d.
 - **Range is biased when the marker is small.** In the synthetic tests the position is good to a few centimetres within 5 m. Beyond about 8 m the marker is roughly 20 pixels wide and the range reads up to 5% long, while the direction stays within a degree. In the simulator, hovering at 5 m with the pad 3.61 m to the side, the detector reported a sideways offset of 3.67 m and found the marker in essentially every frame; range appeared a few percent long but has not been checked against the simulator's ground truth yet.
-- **Blind in the last half metre.** Below about 0.6 m the 1 m marker no longer fits in the image. A smaller marker for the final descent is planned.
+- **One marker size.** Below about 0.6 m the 1 m marker no longer fits in the image. A smaller marker for the final descent is planned.
 - **No hardware validation.** Nothing here has flown on a real vehicle. The project reduces known contributors to the sim-to-real gap; it cannot measure the gap itself.
 
 | Step | Goal | State |
@@ -159,8 +191,8 @@ python3 -m pytest test/test_pad_detection.py
 | 2 | ROS 2 node commanding takeoff, velocity and landing | Done |
 | 3a | World with a marker pad and a downward camera | Done |
 | 3b | Detector node: marker position relative to the camera | Done |
-| 3c | Landing controller: centre over the marker and descend, GPS still on | Next |
-| 3d | Landing error measured over repeated runs | Planned |
+| 3c | Landing controller: centre over the marker and descend, GPS still on | Done |
+| 3d | Landing error measured over repeated runs | Next |
 | 4 | Landing on a marker that moves on flat ground | Planned |
 | 5 | GNSS switched off, estimator running on non-GPS sources | Planned |
 | 6 | Ship with wave motion (heave, roll, pitch) and touchdown timing | Planned |
@@ -180,8 +212,12 @@ drone-ship-landing/
     ├── config/camera_down.parm       autopilot parameters: camera straight down
     ├── tools/make_marker.py          regenerates the marker texture
     ├── test/test_pad_detection.py    tests for the detection code
+    ├── test/test_landing_control.py  closed-loop tests for the landing logic
     └── ship_landing/
-        ├── takeoff_demo.py           takeoff, hover or cruise, and landing node
+        ├── flight_base.py            shared: connect, arm, take off, land, timeouts
+        ├── takeoff_demo.py           takeoff, cruise and landing node
+        ├── land_on_pad.py            takeoff and marker-guided landing node
+        ├── landing_control.py        landing decisions, no ROS
         ├── marker_detector.py        camera image to marker position, ROS node
         ├── pad_detection.py          marker detection and pose estimate, no ROS
         └── ap_names.py               finds the autopilot's topic prefix

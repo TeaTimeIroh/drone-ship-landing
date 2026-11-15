@@ -66,6 +66,7 @@ class MarkerDetector(Node):
         self.dist_coeffs = None
         self.frames = 0
         self.hits = 0
+        self.recent_hits = 0
         self.last = None
         self.warned_mirrored = False
 
@@ -97,6 +98,7 @@ class MarkerDetector(Node):
         self.frames += 1
         if detection is not None:
             self.hits += 1
+            self.recent_hits += 1
             self.last = detection
             self.publish_pose(msg, detection)
         elif not self.warned_mirrored and self.detector.is_mirrored(gray):
@@ -143,14 +145,18 @@ class MarkerDetector(Node):
         self.debug_pub.publish(out)
 
     def report(self):
-        rate = 100.0 * self.hits / self.frames
+        recent, self.recent_hits = self.recent_hits, 0
         if self.last is None:
             self.get_logger().info(f'{self.frames} frames, marker not seen yet')
-            return
-        x, y, z = self.last.position
-        self.get_logger().info(
-            f'seen in {rate:.0f}% of {self.frames} frames | last: right {x:+.2f} m, '
-            f'down-image {y:+.2f} m, range along lens {z:.2f} m, sideways offset {np.hypot(x, y):.2f} m')
+        elif recent == 0:
+            self.get_logger().info(
+                f'marker not visible in the last {LOG_EVERY_FRAMES} frames '
+                f'(seen in {self.hits} of {self.frames} so far)')
+        else:
+            x, y, z = self.last.position
+            self.get_logger().info(
+                f'seen in {recent}/{LOG_EVERY_FRAMES} recent frames | right {x:+.2f} m, '
+                f'down-image {y:+.2f} m, range along lens {z:.2f} m, sideways offset {np.hypot(x, y):.2f} m')
 
 
 def main():

@@ -1,4 +1,13 @@
 __pycache__/
 *.pyc
-*:Zone.Identifier
 .pytest_cache/
+*:Zone.Identifier
+
+# Files the simulator and MAVProxy write into the folder they are started from
+eeprom.bin
+mav.parm
+mav_*.parm
+mav.tlog
+mav.tlog.raw
+terrain/
+logs/
