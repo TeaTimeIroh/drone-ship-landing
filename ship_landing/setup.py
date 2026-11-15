@@ -1,0 +1,28 @@
+from setuptools import find_packages, setup
+
+package_name = 'ship_landing'
+
+setup(
+    name=package_name,
+    version='0.0.0',
+    packages=find_packages(exclude=['test']),
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    maintainer='TeaTimeIroh',
+    maintainer_email='th.tsantilas@gmail.com',
+    description='Autonomous UAV precision landing on a moving vessel in GNSS-denied environments using ROS 2, Gazebo and ArduPilot.',
+    license='MIT',
+    extras_require={
+        'test': [
+            'pytest',
+        ],
+    },
+    entry_points={
+        'console_scripts': ['takeoff_demo = ship_landing.takeoff_demo:main'],
+    },
+)
