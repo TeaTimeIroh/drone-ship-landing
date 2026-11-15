@@ -40,6 +40,7 @@ class TakeoffDemo(Node):
         self.state = 'GUIDED'
         self.state_entered = None
         self.pending = None
+        self.pending_since = None
         self.wait_until = None
         self.failed = False
 
@@ -59,6 +60,7 @@ class TakeoffDemo(Node):
         if self.pending is None:
             if client.service_is_ready():
                 self.pending = client.call_async(request)
+                self.pending_since = self.get_clock().now()
             return None
         if not self.pending.done():
             return None
@@ -70,6 +72,7 @@ class TakeoffDemo(Node):
         self.state = next_state
         self.state_entered = now
         self.pending = None
+        self.pending_since = None
         self.wait_until = None
 
     def advance(self, ok, next_state, now):
@@ -105,6 +108,9 @@ class TakeoffDemo(Node):
             self.handle_timeout(now)
             return
         if self.wait_until is not None and now < self.wait_until:
+            if self.pending is not None and now - self.pending_since > Duration(seconds=3.0):
+                self.get_logger().warn(f'{self.state}: no reply, sending again')
+                self.pending = None
             return
 
         if self.state == 'GUIDED':

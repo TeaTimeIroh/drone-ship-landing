@@ -1,6 +1,9 @@
+from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = 'ship_landing'
+share = 'share/' + package_name
 
 setup(
     name=package_name,
@@ -9,7 +12,13 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
+        (share, ['package.xml']),
+        (share + '/launch', glob('launch/*.launch.py')),
+        (share + '/worlds', glob('worlds/*.sdf')),
+        (share + '/config', glob('config/*.parm')),
+        (share + '/models/aruco_pad', glob('models/aruco_pad/model.*')),
+        (share + '/models/aruco_pad/materials/textures',
+            glob('models/aruco_pad/materials/textures/*.png')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

@@ -1,0 +1,6 @@
+# Point the gimbal camera straight down by default, for marker detection.
+# Mount default mode 1 = Neutral: hold the neutral angles below.
+MNT1_DEFLT_MODE  1
+MNT1_NEUTRAL_X   0
+MNT1_NEUTRAL_Y   -90
+MNT1_NEUTRAL_Z   0
