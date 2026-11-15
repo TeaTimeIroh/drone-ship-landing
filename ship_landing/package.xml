@@ -3,7 +3,7 @@
 <package format="3">
   <name>ship_landing</name>
   <version>0.0.0</version>
-    <description>Autonomous UAV precision landing on a moving vessel in GNSS-denied environments using ROS 2, Gazebo and ArduPilot.</description>
+  <description>Autonomous UAV precision landing on a moving vessel in GNSS-denied environments using ROS 2, Gazebo and ArduPilot.</description>
   <maintainer email="th.tsantilas@gmail.com">TeaTimeIroh</maintainer>
   <license>MIT</license>
 
