@@ -70,7 +70,7 @@ sudo timedatectl set-ntp false
 
 **ROS 2 topic and service names change with a parameter.** They are `/ap/v1/...` when the autopilot parameter `DDS_USE_NS` is 1 and `/ap/...` when it is 0. Check with `ros2 service list -t | grep ap/`. After being caught by this, the nodes now look the prefix up when they start.
 
-**The launch folder matters.** SITL keeps its saved parameters in `eeprom.bin` in whatever folder the simulator is launched from, and a saved value takes priority over the defaults files. Two launch folders held two different saved sets, so the same launch file produced different topic names. Always launch from the same folder; `param show <name>` in MAVProxy shows the value actually in use.
+**The order of the autopilot's defaults files matters.** Adding my own parameter file to the end of the `--defaults` list silently changed `DDS_USE_NS` from 1 to 0, which renamed every topic. Reading ArduPilot's loader (`AP_Param.cpp`) suggests why: it re-reads the defaults later in start-up only if the last file in the list contained parameters it could not place the first time, and the DDS parameters depend on that second read. Keeping a DDS file last, as the upstream launch file does, restored the names. `param show <name>` in MAVProxy shows the value actually in use, and was what exposed this. Two earlier explanations (a start-up race, then saved parameters in `eeprom.bin`) were wrong.
 
 **Rebuild after editing.** Even with `colcon build --symlink-install`, an edited node kept running its old code until the package was rebuilt.
 
@@ -95,10 +95,9 @@ colcon build --packages-select ship_landing
 source install/setup.bash
 ```
 
-Terminal 1, the simulator with the landing pad. Launch it from `~/ardu_ws` every time:
+Terminal 1, the simulator with the landing pad:
 
 ```bash
-cd ~/ardu_ws
 ros2 launch ship_landing landing_pad.launch.py
 ```
 
@@ -133,7 +132,7 @@ Optional, for watching autopilot status: `mavproxy.py --console --map --aircraft
 
 Example: `ros2 run ship_landing takeoff_demo --ros-args -p use_sim_time:=true -p target_alt:=8.0`
 
-`marker_detector` publishes `landing_pad/pose` (`geometry_msgs/PoseStamped`, marker centre in the camera optical frame: x right in the image, y down in the image, z out of the lens) and `landing_pad/debug_image`. Its parameters are `image_topic`, `camera_info_topic`, `marker_size` (metres, default 1.0), `marker_id` (default 0) and `publish_debug_image`.
+`marker_detector` publishes `landing_pad/pose` (`geometry_msgs/PoseStamped`, marker centre in the camera optical frame: x right in the image, y down in the image, z out of the lens) and `landing_pad/debug_image`. With the camera pointing down, image-right was the drone's right and image-up was the drone's forward direction; this was observed at one heading only. Its parameters are `image_topic`, `camera_info_topic`, `marker_size` (metres, default 1.0), `marker_id` (default 0) and `publish_debug_image`.
 
 ### Tests
 
@@ -150,7 +149,7 @@ python3 -m pytest test/test_pad_detection.py
 - **GPS is still in use.** The GNSS-denied part of the project starts at step 5.
 - **The cruise leg is open-loop.** The node commands a velocity for a fixed time and does not check where the drone ends up.
 - **The marker is seen but not yet used.** The drone still lands where it took off, not on the pad.
-- **Range is biased when the marker is small.** In the synthetic tests the position is good to a few centimetres within 5 m. Beyond about 8 m the marker is roughly 20 pixels wide and the range reads up to 5% long, while the direction stays within a degree. These figures come from rendered test images, not yet from the simulator.
+- **Range is biased when the marker is small.** In the synthetic tests the position is good to a few centimetres within 5 m. Beyond about 8 m the marker is roughly 20 pixels wide and the range reads up to 5% long, while the direction stays within a degree. In the simulator, hovering at 5 m with the pad 3.61 m to the side, the detector reported a sideways offset of 3.67 m and found the marker in essentially every frame; range appeared a few percent long but has not been checked against the simulator's ground truth yet.
 - **Blind in the last half metre.** Below about 0.6 m the 1 m marker no longer fits in the image. A smaller marker for the final descent is planned.
 - **No hardware validation.** Nothing here has flown on a real vehicle. The project reduces known contributors to the sim-to-real gap; it cannot measure the gap itself.
 

@@ -32,14 +32,19 @@ def generate_launch_description():
         p for p in (str(pkg / 'models'), os.environ.get('GZ_SIM_RESOURCE_PATH', '')) if p)
     set_resource_path = SetEnvironmentVariable('GZ_SIM_RESOURCE_PATH', resource_path)
 
-    # Autopilot parameter defaults: the upstream iris set, then ours on top.
+    # Autopilot parameter defaults: the upstream iris set plus our camera file.
+    # The order matters. ArduPilot re-reads the defaults later in start-up only if the
+    # LAST file in this list had parameters it could not place on the first read. The DDS
+    # parameters are in that situation, so a DDS file must stay last, as it is upstream.
+    # With camera_down.parm last, DDS_USE_NS was silently left at 0 and every topic
+    # moved from /ap/v1/... to /ap/...
     sitl_params = pkg_sitl / 'config' / 'default_params'
     defaults = ','.join(str(p) for p in (
         sitl_params / 'copter.parm',
         pkg_ardupilot_gazebo / 'config' / 'gazebo-iris-gimbal.parm',
+        pkg / 'config' / 'camera_down.parm',
         sitl_params / 'dds_udp.parm',
         sitl_params / 'dds_use_ns.parm',
-        pkg / 'config' / 'camera_down.parm',
     ))
 
     gz_launch = str(pkg_ros_gz_sim / 'launch' / 'gz_sim.launch.py')
