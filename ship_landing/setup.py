@@ -32,6 +32,9 @@ setup(
         ],
     },
     entry_points={
-        'console_scripts': ['takeoff_demo = ship_landing.takeoff_demo:main'],
+        'console_scripts': [
+            'takeoff_demo = ship_landing.takeoff_demo:main',
+            'marker_detector = ship_landing.marker_detector:main',
+        ],
     },
 )
