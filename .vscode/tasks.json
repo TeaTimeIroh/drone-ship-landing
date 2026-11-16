@@ -1,0 +1,56 @@
+{
+    // Run these from VS Code: Terminal > Run Task..., or Ctrl+Shift+P > "Tasks: Run Task".
+    // Ctrl+Shift+B runs the build task.
+    "version": "2.0.0",
+    "options": {
+        "shell": { "executable": "/bin/bash", "args": ["-c"] }
+    },
+    "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+    "problemMatcher": [],
+    "tasks": [
+        {
+            "label": "Sim: start (pad world + detector)",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && cd \"$ARDU_WS\" && ros2 launch ship_landing pad_sim.launch.py",
+            "isBackground": true
+        },
+        {
+            "label": "Sim: start with camera view",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && cd \"$ARDU_WS\" && ros2 launch ship_landing pad_sim.launch.py view:=true",
+            "isBackground": true
+        },
+        {
+            "label": "Sim: stop everything",
+            "type": "shell",
+            "command": "pkill -INT -f 'ros2 launch ship_landing'; sleep 3; pkill -f 'gz sim'; pkill arducopter; pkill -f mavproxy; pkill -f marker_detector; pkill -f micro_ros_agent; pkill rviz2; pkill -f rqt_image_view; echo stopped"
+        },
+        {
+            "label": "Fly: land on pad",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && ros2 run ship_landing land_on_pad --ros-args -p use_sim_time:=true"
+        },
+        {
+            "label": "Fly: takeoff demo",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && ros2 run ship_landing takeoff_demo --ros-args -p use_sim_time:=true"
+        },
+        {
+            "label": "Check: where is the drone",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && gz model -m iris -p 2>/dev/null | tail -n 3 && echo 'pad centre is at x = 3, y = 2'"
+        },
+        {
+            "label": "Build package",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && cd \"$ARDU_WS\" && colcon build --packages-select ship_landing --symlink-install",
+            "group": { "kind": "build", "isDefault": true }
+        },
+        {
+            "label": "Run tests",
+            "type": "shell",
+            "command": "cd '${workspaceFolder}/ship_landing' && python3 -m pytest test/test_pad_detection.py test/test_landing_control.py",
+            "group": { "kind": "test", "isDefault": true }
+        }
+    ]
+}

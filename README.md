@@ -108,19 +108,16 @@ colcon build --packages-select ship_landing
 source install/setup.bash
 ```
 
-Terminal 1, the simulator with the landing pad:
+Terminal 1, the simulator with the landing pad and the marker detector. Start it from the workspace folder, because the simulator writes its own files into the folder it is started from:
 
 ```bash
-ros2 launch ship_landing landing_pad.launch.py
+cd ~/ardu_ws
+ros2 launch ship_landing pad_sim.launch.py
 ```
 
-Terminal 2, the marker detector:
+Add `view:=true` to also open the camera view with the detection drawn on it. `landing_pad.launch.py` starts the simulator alone, without the detector.
 
-```bash
-ros2 run ship_landing marker_detector --ros-args -p use_sim_time:=true
-```
-
-Terminal 3, once the simulator log shows "EKF3 IMU0 is using GPS": take off and land on the pad.
+Terminal 2, once the simulator log shows "EKF3 IMU0 is using GPS": take off and land on the pad.
 
 ```bash
 ros2 run ship_landing land_on_pad --ros-args -p use_sim_time:=true
@@ -136,12 +133,6 @@ The simpler demo, without the camera, takes off, flies east for 5 s and lands:
 
 ```bash
 ros2 run ship_landing takeoff_demo --ros-args -p use_sim_time:=true
-```
-
-To watch the camera with the detection drawn on it:
-
-```bash
-ros2 run rqt_image_view rqt_image_view /landing_pad/debug_image
 ```
 
 Optional, for watching autopilot status: `mavproxy.py --console --map --aircraft test --master=:14550`. Add `rviz:=true` to the launch command for RViz; it is off by default because it slows the simulation.
@@ -162,6 +153,21 @@ Parameters, all optional:
 Example: `ros2 run ship_landing land_on_pad --ros-args -p use_sim_time:=true -p target_alt:=8.0`
 
 `marker_detector` publishes `landing_pad/pose` (`geometry_msgs/PoseStamped`, marker centre in the camera optical frame: x right in the image, y down in the image, z out of the lens) and `landing_pad/debug_image`. With the camera pointing down, image-right was the drone's right and image-up was the drone's forward direction; this was observed at one heading only. Its parameters are `image_topic`, `camera_info_topic`, `marker_size` (metres, default 1.0), `marker_id` (default 0) and `publish_debug_image`.
+
+### From VS Code
+
+With the repository folder open in VS Code (WSL), the same commands are available as tasks: Terminal > Run Task, or Ctrl+Shift+P and "Tasks: Run Task". They are defined in `.vscode/tasks.json` and set up their own environment from `env.sh`.
+
+| Task | What it does |
+|------|--------------|
+| Sim: start (pad world + detector) | Simulator, autopilot and detector |
+| Sim: start with camera view | The same, plus the camera view |
+| Sim: stop everything | Stops the simulator and any leftover processes |
+| Fly: land on pad | Marker-guided landing |
+| Fly: takeoff demo | Take off, fly east, land |
+| Check: where is the drone | True position from Gazebo |
+| Build package | `colcon build` for this package (Ctrl+Shift+B) |
+| Run tests | The pytest suite |
 
 ### Tests
 
@@ -203,10 +209,13 @@ These tests check the logic. They say little about real accuracy, because the dr
 ```
 drone-ship-landing/
 ├── README.md
+├── env.sh                            shell setup: ROS, workspace, Gazebo paths
+├── .vscode/tasks.json                VS Code tasks for the common commands
 └── ship_landing/                     ROS 2 Python package
     ├── package.xml
     ├── setup.py
     ├── launch/landing_pad.launch.py  simulator, autopilot and bridge in the pad world
+    ├── launch/pad_sim.launch.py      the above plus the marker detector
     ├── worlds/landing_pad.sdf        runway world with the landing pad
     ├── models/aruco_pad/             the pad model and its marker texture
     ├── config/camera_down.parm       autopilot parameters: camera straight down
