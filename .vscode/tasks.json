@@ -37,6 +37,11 @@
             "command": "source '${workspaceFolder}/env.sh' && ros2 run ship_landing land_on_pad --ros-args -p use_sim_time:=true"
         },
         {
+            "label": "Fly: land on moving pad (moving pad world must be running)",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && ros2 run ship_landing land_on_moving_pad --ros-args -p use_sim_time:=true"
+        },
+        {
             "label": "Fly: takeoff demo",
             "type": "shell",
             "command": "source '${workspaceFolder}/env.sh' && ros2 run ship_landing takeoff_demo --ros-args -p use_sim_time:=true"
@@ -80,7 +85,7 @@
         {
             "label": "Run tests",
             "type": "shell",
-            "command": "cd '${workspaceFolder}/ship_landing' && python3 -m pytest test/test_pad_detection.py test/test_landing_control.py test/test_ground_truth.py test/test_trial_stats.py test/test_pad_motion.py test/test_levelling.py",
+            "command": "cd '${workspaceFolder}/ship_landing' && python3 -m pytest test/test_pad_detection.py test/test_landing_control.py test/test_ground_truth.py test/test_trial_stats.py test/test_pad_motion.py test/test_levelling.py test/test_pad_tracking.py",
             "group": { "kind": "test", "isDefault": true }
         }
     ],

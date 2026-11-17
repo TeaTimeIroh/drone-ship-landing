@@ -117,3 +117,57 @@ def blend(q0, q1, fraction):
     if sum(a * b for a, b in zip(q0, q1)) < 0.0:      # same rotation, opposite sign
         q1 = tuple(-c for c in q1)
     return normalise(tuple(a + fraction * (b - a) for a, b in zip(q0, q1)))
+
+
+def pad_in_world(x, y, z, position, q, camera_forward=0.0, camera_left=0.0, camera_down=0.0):
+    """Place a detection in the autopilot's local frame: (east, north, up) of the pad's surface.
+
+    x, y, z is the detector's measurement in the camera frame; position (east, north, up)
+    and q are the drone's pose at the moment the image was taken.
+    """
+    offset = levelled_offset(x, y, z, q, camera_forward, camera_left, camera_down)
+    yaw = heading(q)
+    c, s = math.cos(yaw), math.sin(yaw)
+    return (position[0] + c * offset.forward - s * offset.left,
+            position[1] + s * offset.forward + c * offset.left,
+            position[2] - camera_down - offset.height)
+
+
+class PoseBuffer:
+    """Recent poses by time, so the one matching an image's timestamp can be looked up."""
+
+    def __init__(self, keep=3.0):
+        self.keep = keep
+        self.times = []
+        self.poses = []          # (position, quaternion)
+
+    def add(self, t, position, q):
+        if self.times and t <= self.times[-1]:
+            if t < self.times[-1] - 1.0:      # time went backwards: the simulator restarted
+                self.times, self.poses = [], []
+            else:
+                return
+        self.times.append(t)
+        self.poses.append((tuple(position), normalise(q)))
+        while self.times and self.times[0] < t - self.keep:
+            self.times.pop(0)
+            self.poses.pop(0)
+
+    def latest(self):
+        return self.poses[-1] if self.poses else None
+
+    def at(self, t, max_gap=0.5):
+        """(position, quaternion) at time t, interpolated. None if nothing is within max_gap seconds."""
+        if not self.times:
+            return None
+        i = bisect.bisect_left(self.times, t)
+        if i == 0:
+            return self.poses[0] if self.times[0] - t <= max_gap else None
+        if i == len(self.times):
+            return self.poses[-1] if t - self.times[-1] <= max_gap else None
+        t0, t1 = self.times[i - 1], self.times[i]
+        if t1 - t0 > max_gap:
+            return None
+        f = (t - t0) / (t1 - t0)
+        (p0, q0), (p1, q1) = self.poses[i - 1], self.poses[i]
+        return tuple(a + f * (b - a) for a, b in zip(p0, p1)), blend(q0, q1, f)
