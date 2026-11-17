@@ -33,6 +33,8 @@ If the marker is lost for a few seconds the drone climbs to widen its view, and 
 
 The `landing_pad` world is the ArduPilot runway with a 1.25 m pad carrying a 1.0 m marker, placed 3 m east and 2 m north of the take-off point. The `moving_pad` world has the same pad on a cart, described below. The camera is the Iris model's gimbal camera, held pointing straight down by autopilot parameters in `config/camera_down.parm`.
 
+`levelling.py` corrects the camera's view for the drone's tilt. The camera is fixed to the body, so when the drone rolls or pitches a pad straight below appears off to one side: at 5 m height, 10 degrees of tilt moves it by almost 0.9 m. Each detection is rotated by the attitude the autopilot reported for the moment the image was taken, which gives the pad's offset in a frame that stays level. This is checked in flight (see "Numbers") but the landing controller does not use it yet.
+
 `pad_mover` drives the cart in the `moving_pad` world. The pad hangs from the world on two sliding joints, one east-west and one north-south, and each joint is driven at a commanded speed, so the joints decide where the pad is and a drone standing on it is carried along by friction. The node sends the two speeds for a path, either a line (2.5 m each way at 0.5 m/s by default, slowing down to turn round) or a circle, and reads the true joint positions back from Gazebo to stay on the path. The path generator is in `pad_motion.py`, without ROS, with its own tests.
 
 | Component | Version used |
@@ -75,7 +77,25 @@ Batch 2 of run 2 was tighter than the other two (mean 1.0 cm against 1.5 and 1.4
 
 The detector's range matched the true height of the drone above the pad within 0.4% in both runs (ratio 0.996 to 1.004). The camera hangs about 0.1 m below the point Gazebo reports, so the detector actually reads about 2% long at 5 m, in line with the synthetic tests.
 
-What these numbers do not show: the pad was static, there was no wind, the camera was noiseless and undistorted, the drone always faced north, and the last metre was flown by the autopilot using GPS. They describe this simulation, not a real aircraft. The raw data, summaries and plots of both runs are in `docs/landing_trials/baseline/` and `docs/landing_trials/corrected/`.
+### Tilt correction
+
+A separate flight checks the tilt correction. The drone hovers 1.5 m west and 1 m south of the static pad at 5 m and swings hard east-west and then north-south, tilting up to 20 degrees. Each detection is converted to a pad position with and without the correction and compared with the pad's true offset, taken from the autopilot's position estimate. The correction is also tried with roll, pitch or both reversed, so that a misread attitude convention would show up as one of those winning.
+
+| Conversion (RMS horizontal error) | All 308 detections | Tilted more than 4° (127) | Tilted less than 1.5° (99) |
+|---|---|---|---|
+| Camera as it is, tilt ignored | 0.74 m | 1.13 m | 0.10 m |
+| Corrected with the attitude as published | 0.05 m | 0.06 m | 0.05 m |
+| Corrected, roll reversed | 0.99 m | 1.51 m | 0.13 m |
+| Corrected, pitch reversed | 0.96 m | 1.47 m | 0.11 m |
+| Corrected, both reversed | 1.38 m | 2.10 m | 0.16 m |
+
+![Error in the pad's position with and without the tilt correction](docs/tilt_check/tilt_check.png)
+
+The correction as written wins clearly and every reversed variant is worse than no correction, so the attitude is being read correctly. No time offset between image and pose timestamps improved the result, and the heading implied by the camera (89.3°) agrees with the autopilot's (89.9°).
+
+The 5 cm that remains is the same whether the drone is tilted or level, so it does not come from the correction. It is a mix of the autopilot's own position error, which this comparison cannot separate out, and the detector reading about 2% long, which is about 4 cm at the distances flown. This was one flight at one heading and one height.
+
+What the landing numbers do not show: the pad was static, there was no wind, the camera was noiseless and undistorted, the drone always faced north, and the last metre was flown by the autopilot using GPS. They describe this simulation, not a real aircraft. The raw data, summaries and plots of both runs are in `docs/landing_trials/baseline/` and `docs/landing_trials/corrected/`, and the tilt check recording is in `docs/tilt_check/`.
 
 ## Design decisions
 
@@ -89,6 +109,7 @@ What these numbers do not show: the pad was static, there was no wind, the camer
 - **Logic separated from ROS.** Detection (`pad_detection.py`) and the landing decisions (`landing_control.py`) are plain Python. The ROS nodes only move messages in and out, so the logic can be tested without a simulator.
 - **No `cv_bridge`.** Images are converted to NumPy arrays by hand, which avoids a binary dependency that breaks when the system and pip versions of OpenCV and NumPy differ.
 - **The moving pad is driven through joints, not teleported or pushed.** Setting the pad's pose repeatedly is simpler, but a drone standing on a teleported pad is not carried along. A free pad pushed by forces can drift, tip or be shoved by the landing. Speed-driven joints give an exact, repeatable path and real contact with the drone. The cost is that this pad cannot heave or tilt, so the ship in step 6 needs a different mechanism.
+- **Conventions are checked in flight before they are relied on.** The tilt correction depends on what the autopilot's attitude quaternion means. Its source and comments say one thing, but a comment had already been wrong about the sideways velocity sign. So the correction came with a recording flight and an analysis that would name the wrong sign if there were one, and nothing used it until that passed.
 - **Versions follow ArduPilot's documentation.** Ubuntu 22.04, ROS 2 Humble and Gazebo Harmonic are the combination the ArduPilot guides describe, chosen over newer releases to stay on the supported path.
 
 ## Lessons learned
@@ -226,6 +247,13 @@ cd ~/ardu_ws/src/drone-ship-landing
 ship_landing/tools/run_trials.sh 3 10        # 3 batches of 10 landings, about 35 minutes
 ```
 
+`tilt_check` records the flight behind the tilt correction table, in the static pad world, and `analyze_tilt.py` turns the recording into a summary and a plot:
+
+```bash
+ros2 run ship_landing tilt_check --ros-args -p use_sim_time:=true -p output:=results/tilt_check
+python3 ship_landing/tools/analyze_tilt.py results/tilt_check
+```
+
 Results go to `results/<date_time>/`: one CSV per batch, `summary.md` and `touchdowns.png`. The two runs reported under "Numbers" are kept in `docs/landing_trials/`. The start points depend only on the batch number, so two runs can be compared landing by landing. To re-run only the analysis: `python3 ship_landing/tools/analyze_trials.py results/<run>/batch_*.csv --out results/<run>`.
 
 ### From VS Code
@@ -244,17 +272,18 @@ With the repository folder open in VS Code (WSL), the same commands are availabl
 | Pad: set speed | Changes the moving pad's speed; 0 stops it |
 | Measure: quick check | Two landings with the simulator already running |
 | Measure: full run | Three batches of ten landings, starting its own simulator |
+| Measure: tilt check | Swinging flight near the static pad, then the tilt correction summary |
 | Check: where is the drone | True position from Gazebo |
 | Build package | `colcon build` for this package (Ctrl+Shift+B) |
 | Run tests | The pytest suite |
 
 ### Tests
 
-The detection code is tested against synthetic camera views with a known marker position, the landing logic against a closed-loop model with camera delay, noise, dropped frames and a camera that tilts with the drone, and the pad's path generator against its travel, speed and acceleration limits. No simulator is needed:
+The detection code is tested against synthetic camera views with a known marker position, the landing logic against a closed-loop model with camera delay, noise, dropped frames and a camera that tilts with the drone, and the pad's path generator against its travel, speed and acceleration limits, and the tilt correction against a model of a drone that leans as it accelerates. No simulator is needed:
 
 ```bash
 cd ~/ardu_ws/src/drone-ship-landing/ship_landing
-python3 -m pytest test/test_pad_detection.py test/test_landing_control.py test/test_ground_truth.py test/test_trial_stats.py test/test_pad_motion.py
+python3 -m pytest test/test_pad_detection.py test/test_landing_control.py test/test_ground_truth.py test/test_trial_stats.py test/test_pad_motion.py test/test_levelling.py
 ```
 
 These tests check the logic. They say little about real accuracy, because the drone model in them is far simpler than the simulator.
@@ -263,12 +292,12 @@ These tests check the logic. They say little about real accuracy, because the dr
 
 - **Runs slower than real time.** On WSL2 with an RTX 3060 the simulation runs at roughly 0.5 to 0.8 times real time. ArduPilot and Gazebo advance in lockstep, so flight behaviour is unaffected, but it makes every test slower.
 - **GPS is still in use.** The GNSS-denied part of the project starts at step 5.
-- **The camera is fixed to the body, not stabilised.** When the drone tilts to accelerate, the pad appears displaced in the image. The controller does not correct for this; it relies on low speeds and on the error shrinking as the drone gets lower. This will not be good enough for a moving platform.
+- **The camera is fixed to the body, not stabilised.** When the drone tilts to accelerate, the pad appears displaced in the image. A correction using the drone's attitude exists and is verified in flight, but the landing controller does not use it yet; it still relies on low speeds and on the error shrinking as the drone gets lower. On a real aircraft the correction would also inherit the error of the attitude estimate.
 - **The last metre is flown blind.** Below about 1 m the autopilot's LAND mode takes over and holds position using GPS, so the final accuracy still depends on GPS.
 - **Landing accuracy is measured only in easy conditions.** See "Numbers" for what the trials leave out.
 - **The camera-position correction is checked at one heading only.** It removed a constant 2 cm offset in landings facing north. Whether it holds at other headings has not been measured.
 - **Range is biased when the marker is small.** In the synthetic tests the position is good to a few centimetres within 5 m. Beyond about 8 m the marker is roughly 20 pixels wide and the range reads up to 5% long, while the direction stays within a degree. In the simulator, hovering at 5 m with the pad 3.61 m to the side, the detector reported a sideways offset of 3.67 m and found the marker in essentially every frame. The landing trials later checked range against the simulator's ground truth at 5 m; see "Numbers".
-- **The drone cannot land on the moving pad yet.** The controller steers by the pad's offset alone, so it would trail a pad moving at 0.5 m/s by about 1 m, and the autopilot's LAND mode would finish on a spot the pad has left. Steps 4b and 4c address this.
+- **The drone cannot land on the moving pad yet.** The controller steers by the pad's offset alone, so it would trail a pad moving at 0.5 m/s by about 1 m, and the autopilot's LAND mode would finish on a spot the pad has left. Step 4c addresses this.
 - **The moving pad stays level.** It slides east and north only. It cannot heave, roll or pitch.
 - **One marker size.** Below about 0.6 m the 1 m marker no longer fits in the image. A smaller marker for the final descent is planned.
 - **No hardware validation.** Nothing here has flown on a real vehicle. The project reduces known contributors to the sim-to-real gap; it cannot measure the gap itself.
@@ -282,7 +311,7 @@ These tests check the logic. They say little about real accuracy, because the dr
 | 3c | Landing controller: centre over the marker and descend, GPS still on | Done |
 | 3d | Landing error measured over repeated runs | Done |
 | 4a | Pad that moves along a line or a circle, followed by the detector from a hover | Done |
-| 4b | Camera measurement corrected for the drone's tilt | Planned |
+| 4b | Camera measurement corrected for the drone's tilt, checked in flight | Done |
 | 4c | Controller that matches the pad's speed and lands without LAND mode | Planned |
 | 4d | Landing error on the moving pad, measured against pad speed | Planned |
 | 5 | GNSS switched off, estimator running on non-GPS sources | Planned |
@@ -309,12 +338,14 @@ drone-ship-landing/
     ├── tools/make_marker.py          regenerates the marker texture
     ├── tools/run_trials.sh           batches of landings with simulator restarts
     ├── tools/stop_sim.sh             stops the simulator and everything started with it
+    ├── tools/analyze_tilt.py         summary and plot from a tilt check recording
     ├── tools/analyze_trials.py       summary and touchdown plot from trial CSVs
     ├── test/test_pad_detection.py    tests for the detection code
     ├── test/test_landing_control.py  closed-loop tests for the landing logic
     ├── test/test_ground_truth.py     tests for reading Gazebo's pose output
     ├── test/test_trial_stats.py      tests for the trial statistics
     ├── test/test_pad_motion.py       tests for the moving pad's path
+    ├── test/test_levelling.py        tests for the tilt correction and its analysis
     └── ship_landing/
         ├── flight_base.py            shared: connect, arm, take off, land, timeouts
         ├── takeoff_demo.py           takeoff, cruise and landing node
@@ -323,6 +354,9 @@ drone-ship-landing/
         ├── ground_truth.py           true model position from Gazebo
         ├── trial_stats.py            statistics over trial results, no ROS
         ├── landing_control.py        landing decisions, no ROS
+        ├── levelling.py              tilt correction of the camera's view, no ROS
+        ├── tilt_check.py             flight that records data to check the tilt correction
+        ├── tilt_analysis.py          analysis of that recording, no ROS
         ├── marker_detector.py        camera image to marker position, ROS node
         ├── pad_detection.py          marker detection and pose estimate, no ROS
         ├── pad_mover.py              drives the moving pad, ROS node
