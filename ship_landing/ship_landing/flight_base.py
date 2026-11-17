@@ -5,7 +5,11 @@ GUIDED, arming, taking off, and landing, each with a timeout. A mission subclass
 its own states between the climb and the landing by overriding `fly`.
 
 State order:
-    CONNECT -> GUIDED -> ARM -> TAKEOFF -> CLIMB -> (mission states) -> LAND -> TOUCHDOWN
+    CONNECT -> READY -> GUIDED -> ARM -> TAKEOFF -> CLIMB -> (mission states) -> LAND -> TOUCHDOWN
+
+READY waits for the autopilot's own pre-arm checks to pass. Without it, a node started
+while the simulator is still booting can have its mode change overwritten by the
+autopilot's start-up, arm in the wrong mode, and then have every takeoff refused.
 """
 import rclpy
 from rclpy.clock import Clock, ClockType
@@ -13,7 +17,9 @@ from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from geometry_msgs.msg import PoseStamped, TwistStamped
+from ardupilot_msgs.msg import Status
 from ardupilot_msgs.srv import ArmMotors, ModeSwitch, Takeoff
+from std_srvs.srv import Trigger
 
 from ship_landing.ap_names import find_ap_prefix
 
@@ -23,15 +29,17 @@ GUIDED, LAND = 4, 9
 RETRY_DELAY = 2.0       # s, wait after the autopilot refuses a request
 REPLY_TIMEOUT = 3.0     # s, resend a request that got no reply
 LANDED_ALT = 0.3        # m above the take-off point
+MAX_PREFLIGHT_RESTARTS = 8   # times the GUIDED/ARM/TAKEOFF sequence may start over
 
 
 class FlightNode(Node):
     # Seconds of simulation time a state may take. Subclasses add their own states.
     STATE_TIMEOUT = {
         'CONNECT': 30.0,
+        'READY': 180.0,
         'GUIDED': 10.0,
-        'ARM': 30.0,
-        'TAKEOFF': 10.0,
+        'ARM': 60.0,
+        'TAKEOFF': 20.0,
         'CLIMB': 30.0,
         'LAND': 10.0,
         'TOUCHDOWN': 60.0,
@@ -48,6 +56,9 @@ class FlightNode(Node):
         self.target_alt = self.declare_parameter('target_alt', 5.0).value
 
         self.alt = None
+        self.armed = None       # from the autopilot's status topic, None until heard
+        self.mode = None        # flight mode number from the same topic
+        self.preflight_restarts = 0
         self.state = 'CONNECT'
         self.state_entered = None
         self.ticks = 0
@@ -78,13 +89,32 @@ class FlightNode(Node):
         self.get_logger().info(f'Autopilot interface found at {prefix}')
         self.create_subscription(PoseStamped, f'{prefix}/pose/filtered',
                                  self.on_pose, qos_profile_sensor_data)
+        self.create_subscription(Status, f'{prefix}/status', self.on_status, qos_profile_sensor_data)
         self.vel_pub = self.create_publisher(TwistStamped, f'{prefix}/cmd_vel', 10)
         self.mode_cli = self.create_client(ModeSwitch, f'{prefix}/mode_switch')
         self.arm_cli = self.create_client(ArmMotors, f'{prefix}/arm_motors')
         self.takeoff_cli = self.create_client(Takeoff, f'{prefix}/experimental/takeoff')
+        self.prearm_cli = self.create_client(Trigger, f'{prefix}/prearm_check')
 
     def on_pose(self, msg):
         self.alt = msg.pose.position.z
+
+    def on_status(self, msg):
+        self.armed = bool(msg.armed)
+        self.mode = int(msg.mode)
+
+    def restart_preflight(self, why, now):
+        """Go back to the mode switch and redo the arming sequence."""
+        self.preflight_restarts += 1
+        if self.preflight_restarts > MAX_PREFLIGHT_RESTARTS:
+            self.fail(f'Could not get airborne: {why}', now)
+            return
+        self.get_logger().warn(f'{why}; starting the arming sequence again')
+        self.enter('GUIDED', now)
+
+    def on_touchdown(self, now):
+        """Called once the drone is back on the ground. The default ends the flight."""
+        self.finish()
 
     def call(self, client, request):
         """Send one request and return its result on a later tick, else None."""
@@ -184,20 +214,40 @@ class FlightNode(Node):
             prefix = self.prefix or find_ap_prefix(self)
             if prefix:
                 self.connect(prefix)
-                self.enter('GUIDED', now)
+                self.enter('READY', now)
+        elif self.state == 'READY':
+            r = self.call(self.prearm_cli, Trigger.Request())
+            if r is not None:
+                if r.success:
+                    self.enter('GUIDED', now)
+                else:
+                    self.get_logger().info('Waiting for the autopilot to be ready to arm',
+                                           throttle_duration_sec=10.0)
+                    self.wait_until = now + Duration(seconds=RETRY_DELAY)
         elif self.state == 'GUIDED':
             r = self.call(self.mode_cli, ModeSwitch.Request(mode=GUIDED))
             if r is not None:
                 self.advance(r.status, 'ARM', now)
         elif self.state == 'ARM':
+            if self.pending is None and self.mode is not None and self.mode != GUIDED:
+                self.restart_preflight(f'the autopilot is in mode {self.mode}, not GUIDED', now)
+                return
             r = self.call(self.arm_cli, ArmMotors.Request(arm=True))
             if r is not None:
                 self.advance(r.result, 'TAKEOFF', now)
         elif self.state == 'TAKEOFF':
             r = self.call(self.takeoff_cli, Takeoff.Request(alt=float(self.target_alt)))
             if r is not None:
-                self.advance(r.status, 'CLIMB', now)
+                if r.status:
+                    self.enter('CLIMB', now)
+                elif self.mode is not None and self.mode != GUIDED:
+                    self.restart_preflight(f'takeoff refused, the autopilot is in mode {self.mode}, not GUIDED', now)
+                elif self.armed is False:
+                    self.restart_preflight('takeoff refused, the motors are disarmed', now)
+                else:
+                    self.advance(False, 'CLIMB', now)
         elif self.state == 'CLIMB':
+            self.preflight_restarts = 0
             if self.alt is not None and self.alt > self.target_alt - 0.5:
                 self.enter(self.FIRST_MISSION_STATE, now)
         elif self.state == 'LAND':
@@ -207,7 +257,7 @@ class FlightNode(Node):
         elif self.state == 'TOUCHDOWN':
             if self.alt is not None and self.alt < LANDED_ALT:
                 self.get_logger().info(f'Touched down, altitude {self.alt:.2f} m')
-                self.finish()
+                self.on_touchdown(now)
         else:
             self.fly(now)
 

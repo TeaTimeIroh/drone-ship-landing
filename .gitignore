@@ -11,3 +11,7 @@ mav.tlog
 mav.tlog.raw
 terrain/
 logs/
+
+# Trial runs: keep the CSVs, summary and figure, not the simulator logs
+results/**/sim_*.log
+results/quick_check.csv

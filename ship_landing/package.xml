@@ -11,6 +11,7 @@
   <depend>geometry_msgs</depend>
   <depend>ardupilot_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_srvs</depend>
 
   <exec_depend>ardupilot_gz_bringup</exec_depend>
   <exec_depend>ardupilot_gazebo</exec_depend>

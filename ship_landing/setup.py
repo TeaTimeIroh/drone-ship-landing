@@ -36,6 +36,7 @@ setup(
             'takeoff_demo = ship_landing.takeoff_demo:main',
             'marker_detector = ship_landing.marker_detector:main',
             'land_on_pad = ship_landing.land_on_pad:main',
+            'landing_trials = ship_landing.landing_trials:main',
         ],
     },
 )

@@ -22,8 +22,8 @@ class LandOnPad(FlightNode):
     AIRBORNE_STATES = ('CLIMB', 'APPROACH')
     FIRST_MISSION_STATE = 'APPROACH'
 
-    def __init__(self):
-        super().__init__('land_on_pad')
+    def __init__(self, name='land_on_pad'):
+        super().__init__(name)
         defaults = LandingParams()
         self.landing_params = LandingParams(
             gain=float(self.declare_parameter('gain', defaults.gain).value),
@@ -52,7 +52,10 @@ class LandOnPad(FlightNode):
                 f'{o.height:.2f} m below, {o.horizontal:.2f} m off centre')
 
     def fly(self, now):
-        # APPROACH: everything between the climb and the autopilot's final landing.
+        self.approach(now)
+
+    def approach(self, now):
+        """The APPROACH state: everything between the climb and the autopilot's final landing."""
         seconds = now.nanoseconds * 1e-9
         if self.lander is None:
             self.lander = PadLander(self.landing_params)
