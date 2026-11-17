@@ -1,10 +1,12 @@
-"""Launch the iris quadcopter in the landing_pad world: Gazebo, ArduPilot SITL and the ROS 2 bridge.
+"""Launch the iris quadcopter in one of this package's worlds: Gazebo, ArduPilot SITL and the ROS 2 bridge.
 
-    ros2 launch ship_landing landing_pad.launch.py
+    ros2 launch ship_landing landing_pad.launch.py                      static pad
+    ros2 launch ship_landing landing_pad.launch.py world:=moving_pad    pad on a cart
     ros2 launch ship_landing landing_pad.launch.py rviz:=true
 
-Reuses the iris launch file from ardupilot_gz_bringup and changes two things:
-the world, and the autopilot defaults (adds config/camera_down.parm).
+`world` is the name of a file in worlds/ without ".sdf"; the world inside the file must
+have the same name. Reuses the iris launch file from ardupilot_gz_bringup and changes
+two things: the world, and the autopilot defaults (adds config/camera_down.parm).
 """
 import os
 from pathlib import Path
@@ -17,8 +19,6 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-WORLD_NAME = 'landing_pad'
-
 
 def generate_launch_description():
     pkg = Path(get_package_share_directory('ship_landing'))
@@ -27,7 +27,7 @@ def generate_launch_description():
     pkg_ardupilot_gazebo = Path(get_package_share_directory('ardupilot_gazebo'))
     pkg_ros_gz_sim = Path(get_package_share_directory('ros_gz_sim'))
 
-    # Let Gazebo find model://aruco_pad in this package.
+    # Let Gazebo find this package's models (model://aruco_pad, model://moving_pad).
     resource_path = os.pathsep.join(
         p for p in (str(pkg / 'models'), os.environ.get('GZ_SIM_RESOURCE_PATH', '')) if p)
     set_resource_path = SetEnvironmentVariable('GZ_SIM_RESOURCE_PATH', resource_path)
@@ -51,7 +51,7 @@ def generate_launch_description():
     gz_server = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(gz_launch),
         launch_arguments={
-            'gz_args': f'-v3 -s -r {pkg / "worlds" / "landing_pad.sdf"}',
+            'gz_args': [f'-v3 -s -r {pkg / "worlds"}/', LaunchConfiguration('world'), '.sdf'],
         }.items(),
     )
     gz_gui = IncludeLaunchDescription(
@@ -64,7 +64,7 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             str(pkg_bringup / 'launch' / 'robots' / 'iris.launch.py')),
         launch_arguments={
-            'world_name': WORLD_NAME,
+            'world_name': LaunchConfiguration('world'),
             'defaults': defaults,
         }.items(),
     )
@@ -77,6 +77,8 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument('world', default_value='landing_pad',
+                              description='World to load: landing_pad or moving_pad.'),
         DeclareLaunchArgument('gui', default_value='true', description='Open the Gazebo window.'),
         DeclareLaunchArgument('rviz', default_value='false', description='Open RViz.'),
         set_resource_path,

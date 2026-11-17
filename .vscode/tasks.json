@@ -11,19 +11,25 @@
         {
             "label": "Sim: start (pad world + detector)",
             "type": "shell",
-            "command": "source '${workspaceFolder}/env.sh' && cd \"$ARDU_WS\" && ros2 launch ship_landing pad_sim.launch.py",
+            "command": "if pgrep -f '[g]z sim' >/dev/null; then echo 'A simulator is already running. Run the task \"Sim: stop everything\" first.'; exit 1; fi; source '${workspaceFolder}/env.sh' && cd \"$ARDU_WS\" && ros2 launch ship_landing pad_sim.launch.py",
             "isBackground": true
         },
         {
             "label": "Sim: start with camera view",
             "type": "shell",
-            "command": "source '${workspaceFolder}/env.sh' && cd \"$ARDU_WS\" && ros2 launch ship_landing pad_sim.launch.py view:=true",
+            "command": "if pgrep -f '[g]z sim' >/dev/null; then echo 'A simulator is already running. Run the task \"Sim: stop everything\" first.'; exit 1; fi; source '${workspaceFolder}/env.sh' && cd \"$ARDU_WS\" && ros2 launch ship_landing pad_sim.launch.py view:=true",
+            "isBackground": true
+        },
+        {
+            "label": "Sim: start moving pad (pad world + detector + pad motion)",
+            "type": "shell",
+            "command": "if pgrep -f '[g]z sim' >/dev/null; then echo 'A simulator is already running. Run the task \"Sim: stop everything\" first.'; exit 1; fi; source '${workspaceFolder}/env.sh' && cd \"$ARDU_WS\" && ros2 launch ship_landing pad_sim.launch.py world:=moving_pad view:=true pattern:=${input:padPattern}",
             "isBackground": true
         },
         {
             "label": "Sim: stop everything",
             "type": "shell",
-            "command": "pkill -INT -f 'ros2 launch ship_landing'; sleep 3; pkill -f 'gz sim'; pkill arducopter; pkill -f mavproxy; pkill -f marker_detector; pkill -f micro_ros_agent; pkill rviz2; pkill -f rqt_image_view; echo stopped"
+            "command": "bash '${workspaceFolder}/ship_landing/tools/stop_sim.sh'"
         },
         {
             "label": "Fly: land on pad",
@@ -34,6 +40,16 @@
             "label": "Fly: takeoff demo",
             "type": "shell",
             "command": "source '${workspaceFolder}/env.sh' && ros2 run ship_landing takeoff_demo --ros-args -p use_sim_time:=true"
+        },
+        {
+            "label": "Fly: hover and watch (60 s at 5 m, then land where it took off)",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && ros2 run ship_landing takeoff_demo --ros-args -p use_sim_time:=true -p cruise_speed:=0.0 -p cruise_time:=60.0"
+        },
+        {
+            "label": "Pad: set speed",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && ros2 param set /pad_mover speed ${input:padSpeed}"
         },
         {
             "label": "Measure: quick check (1 batch of 2 landings, simulator already running)",
@@ -59,8 +75,23 @@
         {
             "label": "Run tests",
             "type": "shell",
-            "command": "cd '${workspaceFolder}/ship_landing' && python3 -m pytest test/test_pad_detection.py test/test_landing_control.py test/test_ground_truth.py test/test_trial_stats.py",
+            "command": "cd '${workspaceFolder}/ship_landing' && python3 -m pytest test/test_pad_detection.py test/test_landing_control.py test/test_ground_truth.py test/test_trial_stats.py test/test_pad_motion.py",
             "group": { "kind": "test", "isDefault": true }
+        }
+    ],
+    "inputs": [
+        {
+            "id": "padPattern",
+            "type": "pickString",
+            "description": "Path of the moving pad",
+            "options": ["line", "circle"],
+            "default": "line"
+        },
+        {
+            "id": "padSpeed",
+            "type": "promptString",
+            "description": "Pad speed in m/s, 0 to 3 (0 stops the pad; use a decimal point, e.g. 1.0)",
+            "default": "0.5"
         }
     ]
 }

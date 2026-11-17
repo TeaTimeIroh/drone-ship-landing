@@ -5,6 +5,16 @@ from setuptools import find_packages, setup
 package_name = 'ship_landing'
 share = 'share/' + package_name
 
+
+def model_files(model):
+    """Install entries for one Gazebo model folder."""
+    return [
+        (f'{share}/models/{model}', glob(f'models/{model}/model.*')),
+        (f'{share}/models/{model}/materials/textures',
+            glob(f'models/{model}/materials/textures/*.png')),
+    ]
+
+
 setup(
     name=package_name,
     version='0.0.0',
@@ -16,9 +26,8 @@ setup(
         (share + '/launch', glob('launch/*.launch.py')),
         (share + '/worlds', glob('worlds/*.sdf')),
         (share + '/config', glob('config/*.parm')),
-        (share + '/models/aruco_pad', glob('models/aruco_pad/model.*')),
-        (share + '/models/aruco_pad/materials/textures',
-            glob('models/aruco_pad/materials/textures/*.png')),
+        *model_files('aruco_pad'),
+        *model_files('moving_pad'),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -37,6 +46,7 @@ setup(
             'marker_detector = ship_landing.marker_detector:main',
             'land_on_pad = ship_landing.land_on_pad:main',
             'landing_trials = ship_landing.landing_trials:main',
+            'pad_mover = ship_landing.pad_mover:main',
         ],
     },
 )
