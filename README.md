@@ -2,7 +2,11 @@
 
 Simulated autonomous landing of a multirotor on a moving platform aboard a moving ship, without GNSS in the final design. Built to learn the ROS 2, ArduPilot and Gazebo stack end to end, with the simulation kept as close to a real system as a desktop setup allows.
 
-**Status: early.** The drone takes off, finds a landing marker with its downward camera, flies over it and lands on it, all commanded from ROS 2 nodes. Over 30 landings from random start points it touched down a median of 2.2 cm from the pad centre, measured against the simulator's ground truth. The pad is static and GPS is still on. The moving platform, the ship and GNSS-denied navigation are not implemented yet. See the roadmap.
+**Status: early.** The drone takes off, finds a landing marker with its downward camera, flies over it and lands on it, all commanded from ROS 2 nodes. Over 30 landings from random start points it touched down a median of 1.5 cm from the pad centre, measured against the simulator's ground truth. The pad is static and GPS is still on. The moving platform, the ship and GNSS-denied navigation are not implemented yet. See the roadmap.
+
+![Drone landing on the marker pad](docs/demo.gif)
+
+*Marker-guided landing in Gazebo, played at 2× recording speed. The simulator ran at 40 to 80% of real time, so this is close to real speed.*
 
 ## How it works
 
@@ -41,28 +45,35 @@ The `landing_pad` world is the ArduPilot runway with a 1.25 m pad carrying a 1.0
 
 ## Numbers
 
-Landing accuracy on the static pad, from 3 batches of 10 landings with the simulator restarted between batches. Each landing started from a random point 1.5 to 4 m from the pad at 5 m height. The error is the distance from the pad centre to the drone's true touchdown position as reported by Gazebo, not the drone's own estimate.
+Landing accuracy on the static pad. Each run is 3 batches of 10 landings with the simulator restarted between batches. Each landing started from a random point 1.5 to 4 m from the pad at 5 m height. The error is the distance from the pad centre to the drone's true touchdown position as reported by Gazebo, not the drone's own estimate.
 
-| | Result |
-|---|---|
-| Landings attempted / completed | 30 / 30 |
-| Median error | 2.2 cm |
-| Mean error | 2.3 cm |
-| 95th percentile | 3.0 cm |
-| Worst | 3.2 cm |
-| Inside the 1.0 m marker | 30 / 30 |
-| Average miss | 1.4 cm west, 1.6 cm south |
-| Start point to touchdown | mean 17.2 s, longest 20.7 s (simulation time) |
+There are two runs. The first showed a constant offset, the second tested an explanation for it. Both used the same 30 start points.
 
-![Touchdown points relative to the pad centre](docs/landing_trials/touchdowns.png)
+| | Run 1: camera assumed at the drone's centre | Run 2: camera position corrected |
+|---|---|---|
+| Landings attempted / completed | 30 / 30 | 30 / 30 |
+| Median error | 2.2 cm | 1.5 cm |
+| Mean error | 2.3 cm | 1.3 cm |
+| 95th percentile | 3.0 cm | 2.1 cm |
+| Worst | 3.2 cm | 2.4 cm |
+| Inside the 1.0 m marker | 30 / 30 | 30 / 30 |
+| Average miss | 1.4 cm west, 1.6 cm south | 0.3 cm west, 0.0 cm south |
+| Batch means | 2.2, 2.3, 2.3 cm | 1.5, 1.0, 1.4 cm |
+| Start point to touchdown (simulation time) | mean 17.2 s, longest 20.7 s | mean 17.4 s, longest 21.5 s |
 
-The three batches agree with each other (mean 2.2, 2.3 and 2.3 cm), so repeated landings in one simulator session did not drift.
+![Touchdown points relative to the pad centre, run 2](docs/landing_trials/corrected/touchdowns.png)
 
-Most of the error is a constant offset, not scatter: the landings cluster about 2 cm south-west of the centre, and the spread around that point is roughly 1 cm. The likely cause is that the camera is mounted a few centimetres off the drone's centre in the Iris model, so centring the camera over the marker leaves the body slightly to one side. That has not been tested; a constant correction would be the check.
+**Run 1.** Most of the error was a constant offset, not scatter: the landings clustered about 2 cm south-west of the centre, with roughly 1 cm of spread around that point. The suspected cause was that the camera does not sit at the drone's centre in the Iris model, so centring the camera over the marker leaves the body to one side.
 
-The detector's range matched the true height of the drone above the pad within 0.3% (ratio 0.998 to 1.003). The camera hangs about 0.1 m below the point Gazebo reports, so the detector actually reads about 2% long at 5 m, in line with the synthetic tests.
+**Run 2.** The camera's position was worked out from the model files (2.0 cm forward and 1.0 cm right of the drone's centre once it is pitched down) and added to the controller before the run. It was not fitted to the run 1 data, which would have implied 1.6 cm and 1.4 cm. The average miss fell from 2.1 cm to 0.3 cm. With about 1 cm of scatter and 30 landings, 0.3 cm is too small to tell apart from chance, so what remains is scatter around the centre.
 
-What these numbers do not show: the pad was static, there was no wind, the camera was noiseless and undistorted, the drone always faced north, and the last metre was flown by the autopilot using GPS. They describe this simulation, not a real aircraft. The raw data and the summary are in `docs/landing_trials/`.
+This supports the camera-position explanation but does not prove it. The drone faced north in every landing, so an offset fixed to the drone and an offset fixed to the world, such as a pad placed slightly off its stated position, would look the same. Landings at a second heading would tell them apart.
+
+Batch 2 of run 2 was tighter than the other two (mean 1.0 cm against 1.5 and 1.4). With ten landings per batch I would not read anything into that.
+
+The detector's range matched the true height of the drone above the pad within 0.4% in both runs (ratio 0.996 to 1.004). The camera hangs about 0.1 m below the point Gazebo reports, so the detector actually reads about 2% long at 5 m, in line with the synthetic tests.
+
+What these numbers do not show: the pad was static, there was no wind, the camera was noiseless and undistorted, the drone always faced north, and the last metre was flown by the autopilot using GPS. They describe this simulation, not a real aircraft. The raw data, summaries and plots of both runs are in `docs/landing_trials/baseline/` and `docs/landing_trials/corrected/`.
 
 ## Design decisions
 
@@ -111,6 +122,8 @@ sudo timedatectl set-ntp false
 **ArduPilot's body-frame velocity command has +y pointing right.** ROS convention (REP-103), and the comment in ArduPilot's own `AP_DDS_ExternalControl.cpp`, say +y is left. On the first marker-guided flight the drone closed the forward gap correctly while flying away sideways, ending 8.6 m from the pad. The detector's log made the cause obvious: one offset shrinking, the other growing. `flight_base.py` now flips the sign in one documented place.
 
 **A node that starts before the autopilot has finished booting can arm and then be unable to take off.** In the first automated run the mode change was accepted early, arming succeeded later, and every takeoff was then refused. The likely cause is the autopilot's own start-up resetting the flight mode after the early change; this was not confirmed. The nodes now wait for the autopilot's pre-arm check, and read back the reported mode and arming state before each step, repeating the sequence if either has changed. Commanding a state and assuming it held was the mistake.
+
+**Starting a second simulator stops the clock for every node.** With one Gazebo already running, a second one logs `Found additional publishers on /clock, using namespaced clock topic only` and publishes its clock under another name. No simulation time reaches ROS, so nodes using `use_sim_time` wait forever, while camera images keep arriving and make everything look alive. Stop the old simulator first; `pgrep -a -f "gz sim"` shows whether one is still running.
 
 **Rebuild after editing.** Even with `colcon build --symlink-install`, an edited node kept running its old code until the package was rebuilt.
 
@@ -176,6 +189,7 @@ Parameters, all optional:
 | `land_on_pad` | `max_speed` | `1.0` | Horizontal speed limit, m/s |
 | `land_on_pad` | `descent_fast`, `descent_slow` | `0.5`, `0.3` | Descent rate above and below 2 m, m/s |
 | `land_on_pad` | `handover_height` | `1.0` | Height at which LAND mode takes over, m |
+| `land_on_pad` | `camera_forward`, `camera_left` | `0.020`, `-0.010` | Camera position relative to the drone's centre, m |
 
 Example: `ros2 run ship_landing land_on_pad --ros-args -p use_sim_time:=true -p target_alt:=8.0`
 
@@ -190,7 +204,7 @@ cd ~/ardu_ws/src/drone-ship-landing
 ship_landing/tools/run_trials.sh 3 10        # 3 batches of 10 landings, about 35 minutes
 ```
 
-Results go to `results/<date_time>/`: one CSV per batch, `summary.md` and `touchdowns.png`. The run reported under "Numbers" is kept in `docs/landing_trials/`. To re-run only the analysis: `python3 ship_landing/tools/analyze_trials.py results/<run>/batch_*.csv --out results/<run>`.
+Results go to `results/<date_time>/`: one CSV per batch, `summary.md` and `touchdowns.png`. The two runs reported under "Numbers" are kept in `docs/landing_trials/`. The start points depend only on the batch number, so two runs can be compared landing by landing. To re-run only the analysis: `python3 ship_landing/tools/analyze_trials.py results/<run>/batch_*.csv --out results/<run>`.
 
 ### From VS Code
 
@@ -227,8 +241,8 @@ These tests check the logic. They say little about real accuracy, because the dr
 - **The camera is fixed to the body, not stabilised.** When the drone tilts to accelerate, the pad appears displaced in the image. The controller does not correct for this; it relies on low speeds and on the error shrinking as the drone gets lower. This will not be good enough for a moving platform.
 - **The last metre is flown blind.** Below about 1 m the autopilot's LAND mode takes over and holds position using GPS, so the final accuracy still depends on GPS.
 - **Landing accuracy is measured only in easy conditions.** See "Numbers" for what the trials leave out.
-- **A constant 2 cm offset is uncorrected.** The landings sit south-west of the pad centre, probably because the camera is off the drone's centre.
-- **Range is biased when the marker is small.** In the synthetic tests the position is good to a few centimetres within 5 m. Beyond about 8 m the marker is roughly 20 pixels wide and the range reads up to 5% long, while the direction stays within a degree. In the simulator, hovering at 5 m with the pad 3.61 m to the side, the detector reported a sideways offset of 3.67 m and found the marker in essentially every frame; range appeared a few percent long but has not been checked against the simulator's ground truth yet.
+- **The camera-position correction is checked at one heading only.** It removed a constant 2 cm offset in landings facing north. Whether it holds at other headings has not been measured.
+- **Range is biased when the marker is small.** In the synthetic tests the position is good to a few centimetres within 5 m. Beyond about 8 m the marker is roughly 20 pixels wide and the range reads up to 5% long, while the direction stays within a degree. In the simulator, hovering at 5 m with the pad 3.61 m to the side, the detector reported a sideways offset of 3.67 m and found the marker in essentially every frame. The landing trials later checked range against the simulator's ground truth at 5 m; see "Numbers".
 - **One marker size.** Below about 0.6 m the 1 m marker no longer fits in the image. A smaller marker for the final descent is planned.
 - **No hardware validation.** Nothing here has flown on a real vehicle. The project reduces known contributors to the sim-to-real gap; it cannot measure the gap itself.
 
@@ -284,7 +298,7 @@ drone-ship-landing/
 
 This project stands on [ArduPilot](https://ardupilot.org) (ArduCopter SITL, the DDS interface and MAVProxy), [Gazebo](https://gazebosim.org) Harmonic, [ROS 2](https://docs.ros.org) Humble, the ArduPilot Gazebo integration packages [`ardupilot_gazebo`](https://github.com/ArduPilot/ardupilot_gazebo) and [`ardupilot_gz`](https://github.com/ArduPilot/ardupilot_gz), the Micro XRCE-DDS agent, and Mission Planner, and on [OpenCV](https://opencv.org) for marker detection. The Iris quadcopter model and the runway come from those ArduPilot packages. `worlds/landing_pad.sdf` is derived from `runway.sdf` in `ardupilot_gz`, which is licensed GPL-3.0.
 
-The project was built with Claude (Anthropic) as a coding assistant. Claude proposed the staged roadmap, wrote the nodes, the launch file, the pad model, the tests and the first draft of this README, and diagnosed setup errors from the logs and screenshots I supplied. Several of its first diagnoses were wrong and were corrected by checking against what the simulator actually did. I chose the project and its goals, installed and built the whole stack, ran every command and every flight in the simulator, and decided what to keep. The problems under "Lessons learned" were found by running each step and reading its output, and the fixes listed are the ones that worked on my machine.
+The project was built with Claude (Anthropic) as a coding assistant. Claude proposed the staged roadmap, wrote the nodes, the launch file, the pad model, the tests and the first draft of this README, and diagnosed setup errors from the logs and screenshots I supplied, and analysed the landing trials. Several of its first diagnoses were wrong and were corrected by checking against what the simulator actually did. I chose the project and its goals, installed and built the whole stack, ran every command and every flight in the simulator, and decided what to keep. The problems under "Lessons learned" were found by running each step and reading its output, and the fixes listed are the ones that worked on my machine.
 
 ## License
 

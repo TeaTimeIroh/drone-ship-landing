@@ -26,6 +26,14 @@ def test_camera_axes_map_to_drone_axes():
     assert offset.height == pytest.approx(5.3)
 
 
+def test_camera_position_is_added_to_the_offset():
+    # Camera 2 cm ahead of and 1 cm to the right of the drone's centre, pad straight below the camera:
+    # seen from the drone's centre, the pad is 2 cm ahead and 1 cm to the right.
+    offset = offset_from_camera(x=0.0, y=0.0, z=1.0, camera_forward=0.02, camera_left=-0.01)
+    assert offset.forward == pytest.approx(0.02)
+    assert offset.left == pytest.approx(-0.01)
+
+
 def test_horizontal_speed_is_capped():
     cmd = horizontal_command(PadOffset(forward=30.0, left=-40.0, height=5.0), LandingParams(max_speed=1.0))
     assert math.hypot(cmd.forward, cmd.left) == pytest.approx(1.0)

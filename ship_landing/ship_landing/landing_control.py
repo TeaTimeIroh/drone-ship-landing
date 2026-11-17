@@ -47,9 +47,14 @@ class LandingParams:
     handover_height: float = 1.0    # m, below this the autopilot's LAND mode finishes the job
 
 
-def offset_from_camera(x, y, z):
-    """Convert the detector's camera-frame position of the pad to a drone-frame offset."""
-    return PadOffset(forward=-y, left=-x, height=z)
+def offset_from_camera(x, y, z, camera_forward=0.0, camera_left=0.0):
+    """Convert the detector's camera-frame position of the pad to a drone-frame offset.
+
+    camera_forward and camera_left say where the camera sits relative to the drone's
+    centre, in metres. The detector measures from the camera, so without them the drone
+    lands with its camera, not its centre, over the pad.
+    """
+    return PadOffset(forward=-y + camera_forward, left=-x + camera_left, height=z)
 
 
 def horizontal_command(offset, params):

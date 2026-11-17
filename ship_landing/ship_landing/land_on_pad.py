@@ -16,6 +16,14 @@ from ship_landing.landing_control import LandingParams, PadLander, offset_from_c
 
 LOG_PERIOD = 2.0    # s of simulation time between progress lines
 
+# Where the camera sits relative to the drone's centre, in metres, for the Iris model
+# with its gimbal camera pitched straight down. Worked out from the model files, not
+# fitted to landing results: the gimbal is mounted 1.0 cm to the right of centre, and
+# pitching the camera 90 degrees about a pivot that is 2 cm off its origin carries it
+# about 2 cm forward. Set both to 0 to switch the correction off.
+CAMERA_FORWARD = 0.020
+CAMERA_LEFT = -0.010
+
 
 class LandOnPad(FlightNode):
     STATE_TIMEOUT = dict(FlightNode.STATE_TIMEOUT, APPROACH=240.0)
@@ -33,6 +41,8 @@ class LandOnPad(FlightNode):
             handover_height=float(
                 self.declare_parameter('handover_height', defaults.handover_height).value),
         )
+        self.camera_forward = float(self.declare_parameter('camera_forward', CAMERA_FORWARD).value)
+        self.camera_left = float(self.declare_parameter('camera_left', CAMERA_LEFT).value)
         self.lander = None
         self.lander_state = None
         self.new_offset = None      # a detection not yet given to the lander
@@ -42,7 +52,8 @@ class LandOnPad(FlightNode):
 
     def on_pad(self, msg):
         p = msg.pose.position
-        self.new_offset = self.last_offset = offset_from_camera(p.x, p.y, p.z)
+        self.new_offset = self.last_offset = offset_from_camera(
+            p.x, p.y, p.z, self.camera_forward, self.camera_left)
 
     def describe(self):
         if self.last_offset is None:
