@@ -29,6 +29,8 @@ class TrackParams:
     height_smoothing: float = 0.7
     max_accel: float = 0.6       # m/s^2, limit on the estimated acceleration
     accel_horizon: float = 0.5   # s, how far ahead the acceleration is trusted; beyond it the speed is held
+    quiet_accel: float = 0.08    # m/s^2, below this the pad counts as not accelerating
+    steady_change: float = 0.06  # m/s^2, the acceleration counts as steady while it changes less than this
 
 
 class PadTrack:
@@ -53,6 +55,7 @@ class PadTrack:
         self.pad_up = None           # altitude of the pad's surface
         self.count = 0
         self.accel_history = deque()     # (time, a_east, a_north) of the last second
+        self.quiet_since = None          # since when the pad has not been accelerating
 
     @property
     def ready(self):
@@ -93,21 +96,33 @@ class PadTrack:
         self.accel_history.append((t, self.accel[0], self.accel[1]))
         while self.accel_history[0][0] < t - 1.0:
             self.accel_history.popleft()
+        if not self.ready or math.hypot(*self.accel) >= p.quiet_accel:
+            self.quiet_since = None
+        elif self.quiet_since is None:
+            self.quiet_since = t
+
+    def quiet_for(self):
+        """Seconds for which the pad has not been accelerating, as far as the detections tell."""
+        return 0.0 if self.quiet_since is None else self.time - self.quiet_since
 
     def _ahead(self, now, extra=0.0):
         """Time to look ahead for the velocity part, and the capped time for the acceleration part."""
         dt = max(0.0, now - self.time) + extra
         return dt, min(dt, self.params.accel_horizon)
 
-    def predict(self, now):
+    def predict(self, now, use_accel=True):
         """Where the pad is expected to be at time `now`: (east, north)."""
         dt, da = self._ahead(now)
+        if not use_accel:
+            da = 0.0
         return tuple(self.position[i] + self.velocity[i] * dt + self.accel[i] * da * (dt - 0.5 * da)
                      for i in range(2))
 
-    def velocity_at(self, now, lead=0.0):
+    def velocity_at(self, now, lead=0.0, use_accel=True):
         """The pad's expected velocity `lead` seconds after `now`: (east, north)."""
         _, da = self._ahead(now, lead)
+        if not use_accel:
+            da = 0.0
         return tuple(self.velocity[i] + self.accel[i] * da for i in range(2))
 
     def unsteadiness(self, window=0.6):
@@ -149,8 +164,8 @@ class MovingPadParams:
     cone_slope: float = 0.10         # m of extra allowed offset per metre of height
     follow_hold: float = 1.0         # s inside the cone before the descent starts
     commit_height: float = 0.85      # m, the drone waits at this height for a good moment to commit
-    commit_hold: float = 0.4         # s the pad must be steady and the drone centred before committing
-    steady_change: float = 0.06      # m/s^2, the pad's acceleration must have changed less than this lately
+    commit_hold: float = 0.4         # s the pad must have been quiet, and the drone centred, before committing
+    patience: float = 8.0            # s of waiting after which a pad that is still accelerating, but evenly, is accepted
     final_descent: float = 0.5       # m/s, rate of the committed descent
     abort_offset: float = 0.3        # m, a seen offset larger than this cancels the commitment
     contact_height: float = 0.20     # m, from here down the drone only matches the pad's speed
@@ -195,6 +210,8 @@ class MovingPadLander:
         self.height = None           # camera above the pad, latest
         self.stall_from = None       # (time, altitude) for touchdown detection
         self.drone_path = deque()    # (time, east, north) of the last half second, for the drone's own velocity
+        self.use_accel = True        # False once committed on a pad that is not accelerating
+        self.waiting_since = None    # since when the drone has been waiting to commit
 
     @property
     def done(self):
@@ -234,13 +251,13 @@ class MovingPadLander:
                 return Command()
 
         # From here on there is an estimate to steer by.
-        target = self.track.predict(now)
+        target = self.track.predict(now, self.use_accel)
         east, north = target[0] - drone[0], target[1] - drone[1]
         self.offset = (east, north)
         distance = math.hypot(east, north)
         self.height = drone[2] - self.camera_down - self.track.pad_up
         # Aim the command a little into the future, because the drone answers with a lag.
-        ve, vn = self.track.velocity_at(now, p.lead_time)
+        ve, vn = self.track.velocity_at(now, p.lead_time, self.use_accel)
 
         if self.state == 'CONTACT':
             return self._contact_command()
@@ -248,7 +265,7 @@ class MovingPadLander:
         # Catch-up velocity: proportional to the offset, plus a slow integral.
         # The integral is for a steady bias, such as the drone flying a little slower than
         # commanded. It is frozen while the pad changes speed, when the offset is not a bias.
-        if distance < p.integral_zone and self.track.unsteadiness() < p.steady_change:
+        if distance < p.integral_zone and self.track.unsteadiness() < self.track.params.steady_change:
             for axis, error in enumerate((east, north)):
                 self.integral[axis] += p.integral_gain * error * dt
             size = math.hypot(*self.integral)
@@ -293,13 +310,23 @@ class MovingPadLander:
             command.up = p.climb_rate                # a cancelled final descent: back up to where the marker is visible
             return command
         if self.height <= p.commit_height:
-            # Wait here, just above where the marker goes out of view, until the pad has
-            # been steady and the drone centred for a moment. Then commit.
-            if not (inside and self.track.unsteadiness() < p.steady_change):
+            # Wait here, just above where the marker goes out of view, for a good moment:
+            # the drone centred and the pad not accelerating. The moments to avoid are the
+            # ones just after the pad changes pace, because the estimate of its acceleration
+            # is then out of date and the last stretch would be flown on it. A pad that
+            # never stops accelerating, on a circle for instance, is accepted after a
+            # while, as long as its acceleration is at least even.
+            if self.waiting_since is None:
+                self.waiting_since = now
+            quiet = self.track.quiet_for() >= p.commit_hold
+            even = (now - self.waiting_since >= p.patience
+                    and self.track.unsteadiness() < self.track.params.steady_change)
+            if not (inside and (quiet or even)):
                 self.inside_since = None
             elif self.inside_since is None:
                 self.inside_since = now
             elif now - self.inside_since >= p.commit_hold:
+                self.use_accel = not quiet
                 self._enter('FINAL', now)
                 command.up = -p.final_descent
             return command
@@ -312,7 +339,9 @@ class MovingPadLander:
         # While the marker is still in view, a large offset means the pad did something
         # unexpected: go back to following instead of landing beside it.
         if age < 0.3 and self.height > p.contact_height + 0.2 and (
-                distance > p.abort_offset or self.track.unsteadiness() > 2.0 * p.steady_change):
+                distance > p.abort_offset or self.track.unsteadiness() > 2.0 * self.track.params.steady_change):
+            self.use_accel = True
+            self.waiting_since = None
             self._enter('DESCEND', now)
             return command
         if now - self.entered > p.final_timeout:

@@ -19,6 +19,7 @@ Afterwards it stops the pad and asks Gazebo where the drone and the pad really a
 The logic is in pad_tracking.py; this node moves messages in and out.
 """
 import math
+from collections import deque
 
 from ardupilot_msgs.srv import ArmMotors
 from geometry_msgs.msg import PoseStamped
@@ -49,8 +50,8 @@ class LandOnMovingPad(FlightNode):
     AIRBORNE_STATES = ('CLIMB', 'TRACK', 'SETTLE')
     FIRST_MISSION_STATE = 'TRACK'
 
-    def __init__(self):
-        super().__init__('land_on_moving_pad')
+    def __init__(self, name='land_on_moving_pad'):
+        super().__init__(name)
         d = MovingPadParams()
         self.pad_params = MovingPadParams(
             gain=float(self.declare_parameter('gain', d.gain).value),
@@ -77,8 +78,14 @@ class LandOnMovingPad(FlightNode):
         self.last_command = (0.0, 0.0, 0.0)
         self.next_disarm = None
         self.pad_joints = None           # true (east, north) of the pad from its start point
+        self.pad_history = deque()       # (time, east, north) of the last second, for its true velocity
         self.pad_stop_sent = False
         self.measure_at = None
+        self.final_attempts = 0
+        self.pad_velocity_at_commit = None
+        self.contact = None              # what was known at the moment of contact
+        self.stop_delay = None           # s from contact until the motors stopped
+        self.used_land_mode = False
 
         self.create_subscription(PoseStamped, 'landing_pad/pose', self.on_pad, 10)
         self.create_subscription(JointState, 'moving_pad/joint_states', self.on_pad_joints, 10)
@@ -106,6 +113,31 @@ class LandOnMovingPad(FlightNode):
         positions = dict(zip(msg.name, msg.position))
         if 'slide_east' in positions and 'slide_north' in positions:
             self.pad_joints = (positions['slide_east'], positions['slide_north'])
+            stamp = stamp_seconds(msg.header.stamp) or self.get_clock().now().nanoseconds * 1e-9
+            if not self.pad_history or stamp > self.pad_history[-1][0]:
+                self.pad_history.append((stamp, *self.pad_joints))
+                while self.pad_history[0][0] < stamp - 1.0:
+                    self.pad_history.popleft()
+
+    def true_pad_velocity(self):
+        """The pad's true (east, north) velocity over the last 0.3 s, from Gazebo's joint positions."""
+        if len(self.pad_history) < 2:
+            return None
+        newest = self.pad_history[-1]
+        oldest = next(row for row in self.pad_history if row[0] >= newest[0] - 0.3)
+        dt = newest[0] - oldest[0]
+        if dt < 0.1:
+            return None
+        return ((newest[1] - oldest[1]) / dt, (newest[2] - oldest[2]) / dt)
+
+    def set_pad_speed(self, speed):
+        """Ask pad_mover for a new speed. Returns False if pad_mover is not there."""
+        if not self.pad_param_cli.service_is_ready():
+            return False
+        request = SetParameters.Request()
+        request.parameters = [Parameter('speed', Parameter.Type.DOUBLE, float(speed)).to_parameter_msg()]
+        self.pad_param_cli.call_async(request)
+        return True
 
     # ---- flying ----------------------------------------------------------------------
 
@@ -137,6 +169,15 @@ class LandOnMovingPad(FlightNode):
                 f'moving pad: {self.lander_state or "start"} -> {self.lander.state}{note} | {self.describe()}')
             self.lander_state = self.lander.state
             self.last_log = seconds
+            if self.lander.state == 'FINAL':
+                self.final_attempts += 1
+                self.pad_velocity_at_commit = self.true_pad_velocity()
+            elif self.lander.state == 'CONTACT':
+                self.contact = {
+                    'time': seconds,
+                    'pad_velocity': self.true_pad_velocity(),
+                    'estimated_offset': self.lander.offset,
+                }
         elif self.last_log is None or seconds - self.last_log >= LOG_PERIOD:
             self.get_logger().info(f'moving pad: {self.lander.state} | {self.describe()}')
             self.last_log = seconds
@@ -166,6 +207,7 @@ class LandOnMovingPad(FlightNode):
             return
         if self.time_in_state(now) > DISARM_GIVE_UP:
             self.get_logger().warn('The autopilot would not stop the motors; switching to LAND mode')
+            self.used_land_mode = True
             self.enter('LAND', now)
             return
         if self.pending is None and self.next_disarm is not None and seconds < self.next_disarm:
@@ -186,7 +228,8 @@ class LandOnMovingPad(FlightNode):
             self.finish()
 
     def motors_stopped(self, now):
-        self.get_logger().info(f'Motors stopped on the pad after {self.time_in_state(now):.1f} s of contact')
+        self.stop_delay = self.time_in_state(now)
+        self.get_logger().info(f'Motors stopped on the pad after {self.stop_delay:.1f} s of contact')
         if self.measure:
             self.enter('MEASURE', now)
         else:
@@ -196,14 +239,11 @@ class LandOnMovingPad(FlightNode):
         """Stop the pad, then compare the drone's and the pad's true positions."""
         seconds = now.nanoseconds * 1e-9
         if not self.pad_stop_sent:
-            if not self.pad_param_cli.service_is_ready():
+            if not self.set_pad_speed(0.0):
                 if self.time_in_state(now) > 5.0:
                     self.get_logger().warn('pad_mover is not running, so the touchdown cannot be measured')
-                    self.finish()
+                    self.touchdown_measured(now, None)
                 return
-            request = SetParameters.Request()
-            request.parameters = [Parameter('speed', Parameter.Type.DOUBLE, 0.0).to_parameter_msg()]
-            self.pad_param_cli.call_async(request)
             self.pad_stop_sent = True
             self.measure_at = seconds + PAD_STOP_TIME
             self.get_logger().info('Stopping the pad to measure where the drone stands on it')
@@ -213,7 +253,7 @@ class LandOnMovingPad(FlightNode):
         drone = gz_model_pose('iris')
         if drone is None or self.pad_joints is None:
             self.get_logger().warn('Could not read the true positions from Gazebo')
-            self.finish()
+            self.touchdown_measured(now, None)
             return
         pad_east = self.pad_origin[0] + self.pad_joints[0]
         pad_north = self.pad_origin[1] + self.pad_joints[1]
@@ -223,6 +263,11 @@ class LandOnMovingPad(FlightNode):
             f'True touchdown position (Gazebo): {100 * east:+.1f} cm east, {100 * north:+.1f} cm north '
             f'of the pad centre, {100 * math.hypot(east, north):.1f} cm off, '
             f'{"on the pad" if on_pad else "NOT on the pad"} (drone height {drone.z:.2f} m)')
+        self.touchdown_measured(now, {'east': east, 'north': north, 'on_pad': on_pad, 'drone_z': drone.z,
+                                      'drone_x': drone.x, 'drone_y': drone.y})
+
+    def touchdown_measured(self, now, result):
+        """Called once after the landing with the true offset from the pad centre, or None."""
         self.get_logger().info(f'{self.detections} detections used, {self.dropped} dropped for lack of a pose')
         self.finish()
 

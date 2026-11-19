@@ -2,7 +2,7 @@
 
 Simulated autonomous landing of a multirotor on a moving platform aboard a moving ship, without GNSS in the final design. Built to learn the ROS 2, ArduPilot and Gazebo stack end to end, with the simulation kept as close to a real system as a desktop setup allows.
 
-**Status: early.** The drone takes off, finds a landing marker with its downward camera, flies over it and lands on it, all commanded from ROS 2 nodes. Over 30 landings from random start points it touched down a median of 1.5 cm from the pad centre, measured against the simulator's ground truth. That is on a static pad with GPS still on. In a second world the pad moves at 0.5 m/s, and the drone follows it down and lands on it; the one landing measured so far was 17 cm off centre, and a proper set of trials is the next step. The ship and GNSS-denied navigation are not implemented. See the roadmap.
+**Status: early.** The drone takes off, finds a landing marker with its downward camera, flies over it and lands on it, all commanded from ROS 2 nodes. Over 30 landings from random start points it touched down a median of 1.5 cm from the pad centre, measured against the simulator's ground truth. That is on a static pad with GPS still on. In a second world the pad moves back and forth at 0.5 m/s, and the drone follows it down and lands on it: 30 of 30 landings were on the pad, with a median error of 3.0 cm. Three of them were about 28 cm off, for a reason that is understood and not yet fixed. The ship and GNSS-denied navigation are not implemented. See the roadmap.
 
 ![Drone landing on the marker pad](docs/demo.gif)
 
@@ -41,8 +41,8 @@ The `landing_pad` world is the ArduPilot runway with a 1.25 m pad carrying a 1.0
 
 1. **Estimate:** each detection is tilt-corrected and placed in the autopilot's local frame. A fixed-gain filter there tracks the pad's position, velocity and acceleration.
 2. **Follow:** the drone is commanded to fly at the pad's estimated velocity plus a correction proportional to the remaining offset, with the velocity taken 0.4 s ahead to cover the drone's own lag.
-3. **Descend:** it comes down while inside the same narrowing cone as on the static pad, then waits 0.85 m above the pad until the pad has been steady for a moment.
-4. **Commit:** the last stretch is flown at 0.5 m/s without pausing. Below about 0.6 m the marker no longer fits in the image, so the final half metre follows the estimate alone.
+3. **Descend:** it comes down while inside the same narrowing cone as on the static pad, then waits 0.85 m above the pad for a moment when it is centred and the pad is not accelerating. A pad that never stops accelerating, on a circle for instance, is accepted after 8 s if its acceleration is at least even.
+4. **Commit:** the last stretch is flown at 0.5 m/s without pausing, on the pad's estimated velocity alone. Below about 0.6 m the marker no longer fits in the image, so the final half metre gets no new detections.
 5. **Touch down:** on the pad it asks for the velocity it is already being carried at, so the autopilot has nothing to correct, and asks the autopilot to stop the motors. The autopilot refuses until its own landing detector is satisfied, so the motors cannot be stopped in the air by mistake.
 
 The node then stops the pad and reads the drone's and the pad's true positions from Gazebo.
@@ -107,9 +107,39 @@ The 5 cm that remains is the same whether the drone is tilted or level, so it do
 
 ### Moving pad
 
-Not measured properly yet. One landing on the pad moving along its line at 0.5 m/s touched down 17.0 cm off centre along the direction of travel and 0.7 cm across it, on the pad, by Gazebo's ground truth. One landing says little; repeated trials are step 4d.
+Landing on the pad moving back and forth along its line: 2.5 m each way at 0.5 m/s, slowing down and turning round at 0.25 m/s². Each run is 3 batches of 10 landings with the simulator restarted between batches. Each landing starts from a random point 1.5 to 4 m from the middle of the pad's path at 5 m height, after a random wait of up to 12 s so that the pad is caught at a different point of its path each time. After the motors stop, the pad is brought to rest and the drone's and the pad's true positions are read from Gazebo.
 
-Before that flight, a simplified closed-loop model (in `test/moving_pad_sim.py`, with the drone's response shaped on the tilt check recording) predicted a median of about 6 cm on this path, with roughly one landing in four more than 15 cm off. In the model those are the landings where the pad starts or ends a turn-around during the last 1.5 s, when the drone can no longer see the marker. The measured landing is consistent with that, but one landing cannot confirm it.
+There are three runs. The first exposed a fault in the landing logic, the second tested the fix, and the third repeats the second with a fault in the trial setup removed.
+
+| | Run 1: first version | Run 2: commit rule fixed | Run 3: trial setup fixed |
+|---|---|---|---|
+| Attempts | 19 | 19 | 30 |
+| Landed on the pad | 17 | 17 | 30 |
+| Pad not found from the start point | 2 | 2 | 0 |
+| Median error | 8.8 cm | 2.4 cm | 3.0 cm |
+| Mean error | 13.2 cm | 4.5 cm | 5.3 cm |
+| 95th percentile | 27.6 cm | 30.3 cm | 27.6 cm |
+| Worst | 27.6 cm | 30.3 cm | 28.5 cm |
+| More than 15 cm off | 7 | 1 | 3 |
+| Average error along the pad's travel | 12.3 cm ahead | 4.1 cm ahead | 4.1 cm ahead |
+| Spread across the pad's travel | 1.0 cm | 0.8 cm | 1.0 cm |
+| Start point to touchdown (simulation time) | mean 21.1 s | mean 23.8 s | mean 19.3 s, longest 25.3 s |
+
+![Touchdown points on the moving pad, run 3, relative to the pad's direction of travel](docs/moving_pad_trials/run3/touchdowns.png)
+
+In the plot, right is ahead of the pad centre in the direction the pad was travelling at touchdown. The two groups are split by what the pad really did between the drone's commitment and touchdown, not by batch.
+
+**Across the pad's travel the error is about 1 cm in every run.** Detection and the tilt correction are not the limit. Everything of interest happens along the direction of travel.
+
+**Run 1** had two groups of landings: 8 within about 5 cm, and 7 between 22 and 28 cm ahead of the centre. I had predicted misses of that size from the pad changing speed during the blind last half metre, but the log showed that only 2 of the 7 were that. The other 5 followed a different pattern. While the pad turned round, the drone trailed it by up to 0.27 m and could not commit. When the turn-around ended, the drone caught up and committed at once, with the estimate still saying the pad was accelerating. The marker then went out of view, the estimate was never corrected, and the drone flew the last stretch at 0.62 to 0.68 m/s against the pad's 0.5 m/s. The waiting rule was steering commitments to the worst moment.
+
+**Run 2** changed the rule: commit only when the pad's estimated acceleration has been near zero for 0.4 s, and fly the final stretch on velocity alone. With the same start points and seeds, none of the five turn-around cases repeated, and the landings more than 15 cm off fell from 7 to 1.
+
+**Runs 1 and 2 shared a fault in the trial setup**, described under "Lessons learned": from the second landing of each batch, the start points were several metres from where they were meant to be, mostly 7 m east and 3 m north of the pad, at the edge of the camera's view. Two start points in each run were out of view altogether, the pad was never found, and the batch ended. The landing errors of those runs are valid measurements, but the start points were not the ones described above.
+
+**Run 3** has the start points where they should be. All 30 landings ended on the pad. In the 27 where the pad held its velocity through the final descent, the worst error was 6.6 cm and the median 2.6 cm. In the 3 where the pad began to turn round after the drone had committed, the errors were 25 to 28.5 cm, all ahead of the centre: the drone kept the pad's earlier speed while the pad braked, and could not see it. That is 1 landing in 10, close to what the timing predicts for this path, where a turn-around begins every 12 s and the final descent takes about 1.5 s.
+
+What these numbers do not show: one path at one speed, the pad level, no wind, a noiseless camera, the drone facing north throughout, and GPS in use for the drone's own position. The circle and faster pads have not been measured. The simplified model in `test/moving_pad_sim.py` predicted the blind-descent misses but not the turn-around fault, because its drone followed turn-arounds more closely than the simulated ArduCopter does. All three runs are in `docs/moving_pad_trials/`.
 
 What the static-pad landing numbers do not show: the pad was static, there was no wind, the camera was noiseless and undistorted, the drone always faced north, and the last metre was flown by the autopilot using GPS. They describe this simulation, not a real aircraft. The raw data, summaries and plots of both runs are in `docs/landing_trials/baseline/` and `docs/landing_trials/corrected/`, and the tilt check recording is in `docs/tilt_check/`.
 
@@ -172,6 +202,12 @@ sudo timedatectl set-ntp false
 **A joint driven by speed commands ignores its position limits unless it has an effort limit.** Gazebo's physics engine reports this in the log. The moving pad's joints have both.
 
 **The autopilot will not stop the motors on request while it thinks it is flying.** A disarm request over DDS is refused until ArduPilot's landing detector is satisfied. That is useful as a safeguard, but the detector does not accept a leaning drone. On the first moving-pad landing the drone, standing on the pad, was still commanded to fly at the pad's last estimated velocity. The pad turned round, the estimate could not follow because the marker was out of view, and the autopilot leaned against the pad to correct a velocity error that grew to 1 m/s. The motors ran for 10 s until the fallback. Commanding the velocity the drone already has, measured from its own position, removed the error; the motors then stopped 1.7 s after contact.
+
+**A rule meant to pick a good moment picked the worst one.** The moving-pad landing waited above the pad until it was centred and the pad "steady", then committed. In flight, the drone was off-centre for as long as the pad was turning round, so the first moment that passed the test was just after a turn-around, when the estimate of the pad's acceleration was still out of date and about to be frozen by the blind descent. Five of seventeen landings missed by about 26 cm because of it. The test now asks for what was actually needed, no estimated acceleration, instead of a proxy for it. The closed-loop model had not shown the problem, because its drone was better at following turn-arounds than the real one.
+
+**The autopilot's position is measured from home, and home moves when the motors are armed.** `pose/filtered` is relative to home, and ArduCopter resets home at every arming. The moving-pad trials re-arm on the pad, so from the second landing on, every position was measured from a different spot, and start points given in world coordinates ended up metres away. The landing itself did not care, since it only uses differences, which is why the fault survived two runs: it showed only as start points at the edge of the camera's view and two "pad was not found" failures that happened to be the two northernmost start points. The trials now tie the autopilot's frame to the world before each flight, using the drone's known position on the ground.
+
+**Restarting the pad synchronised it with the trial.** Each trial sets the stopped pad moving again and then lands some fairly constant time later, so the pad was always at a similar point of its path at touchdown. In a rehearsal against a stand-in autopilot, all three landings fell during a turn-around. The random wait before each landing now spans a full leg of the pad's path.
 
 **Rebuild after editing.** Even with `colcon build --symlink-install`, an edited node kept running its old code until the package was rebuilt.
 
@@ -288,23 +324,37 @@ python3 ship_landing/tools/analyze_tilt.py results/tilt_check
 
 Results go to `results/<date_time>/`: one CSV per batch, `summary.md` and `touchdowns.png`. The two runs reported under "Numbers" are kept in `docs/landing_trials/`. The start points depend only on the batch number, so two runs can be compared landing by landing. To re-run only the analysis: `python3 ship_landing/tools/analyze_trials.py results/<run>/batch_*.csv --out results/<run>`.
 
+### Measuring accuracy on the moving pad
+
+`moving_pad_trials` does the same on the moving pad. Each landing is followed by a measurement with the pad at rest, and the next one takes off from the pad. A trial that does not end with the drone standing on the pad ends its batch, since a drone left on the ground would be in the pad's way.
+
+```bash
+bash ship_landing/tools/run_moving_trials.sh 3 10              # 3 batches of 10 landings, about an hour
+PATTERN=circle bash ship_landing/tools/run_moving_trials.sh    # the pad on its circle
+PAD_SPEED=1.0 bash ship_landing/tools/run_moving_trials.sh     # a faster pad
+```
+
+Results go to `results/moving_<date_time>/`: one CSV per batch, `summary.md` and `touchdowns.png`, drawn relative to the pad's direction of travel.
+
 ### From VS Code
 
 With the repository folder open in VS Code (WSL), the same commands are available as tasks: Terminal > Run Task, or Ctrl+Shift+P and "Tasks: Run Task". They are defined in `.vscode/tasks.json` and set up their own environment from `env.sh`. The start tasks refuse to run while a simulator is already up, because a second one leaves every node without a clock.
 
 | Task | What it does |
 |------|--------------|
-| Sim: start (pad world + detector) | Simulator, autopilot and detector |
-| Sim: start with camera view | The same, plus the camera view |
+| Sim: start static pad | Simulator, autopilot and detector |
+| Sim: start static pad with camera view | The same, plus the camera view |
 | Sim: start moving pad | The moving pad world with the camera view; asks for line or circle |
 | Sim: stop everything | Stops the simulator and any leftover processes, and lists any that survive |
-| Fly: land on pad | Marker-guided landing |
+| Fly: land on static pad | Marker-guided landing |
 | Fly: land on moving pad | Follow the moving pad, land on it, report the true touchdown position |
 | Fly: takeoff demo | Take off, fly east, land |
 | Fly: hover and watch | Hover at 5 m for 60 s, then land where it took off |
 | Pad: set speed | Changes the moving pad's speed; 0 stops it |
-| Measure: quick check | Two landings with the simulator already running |
-| Measure: full run | Three batches of ten landings, starting its own simulator |
+| Measure: static pad quick check | Two landings with the simulator already running |
+| Measure: static pad full run | Three batches of ten landings, starting its own simulator |
+| Measure: moving pad quick check | Two landings on the moving pad, starting its own simulator |
+| Measure: moving pad full run | Three batches of ten landings on the moving pad |
 | Measure: tilt check | Swinging flight near the static pad, then the tilt correction summary |
 | Check: where is the drone | True position from Gazebo |
 | Build package | `colcon build` for this package (Ctrl+Shift+B) |
@@ -316,7 +366,7 @@ The detection code is tested against synthetic camera views with a known marker 
 
 ```bash
 cd ~/ardu_ws/src/drone-ship-landing/ship_landing
-python3 -m pytest test/test_pad_detection.py test/test_landing_control.py test/test_ground_truth.py test/test_trial_stats.py test/test_pad_motion.py test/test_levelling.py test/test_pad_tracking.py
+python3 -m pytest test/test_pad_detection.py test/test_landing_control.py test/test_ground_truth.py test/test_trial_stats.py test/test_pad_motion.py test/test_levelling.py test/test_pad_tracking.py test/test_moving_trial_stats.py
 ```
 
 These tests check the logic. They say little about real accuracy, because the drone model in them is far simpler than the simulator.
@@ -330,8 +380,8 @@ These tests check the logic. They say little about real accuracy, because the dr
 - **Landing accuracy is measured only in easy conditions.** See "Numbers" for what the trials leave out.
 - **The camera-position correction is checked at one heading only.** It removed a constant 2 cm offset in landings facing north. Whether it holds at other headings has not been measured.
 - **Range is biased when the marker is small.** In the synthetic tests the position is good to a few centimetres within 5 m. Beyond about 8 m the marker is roughly 20 pixels wide and the range reads up to 5% long, while the direction stays within a degree. In the simulator, hovering at 5 m with the pad 3.61 m to the side, the detector reported a sideways offset of 3.67 m and found the marker in essentially every frame. The landing trials later checked range against the simulator's ground truth at 5 m; see "Numbers".
-- **The last half metre onto the moving pad is flown blind.** Below about 0.6 m the marker does not fit in the image, so the drone cannot react if the pad changes speed just before touchdown. The model puts the resulting misses at up to about 0.3 m on the 0.5 m/s line, and the one measured landing was 17 cm off. A second, smaller marker that stays visible lower down is the likely remedy.
-- **The moving-pad landing is barely measured.** One landing, one path, one speed.
+- **The last half metre onto the moving pad is flown blind.** Below about 0.6 m the marker does not fit in the image, so the drone cannot react if the pad changes speed just before touchdown. On the 0.5 m/s line this happened in 3 of 30 landings and cost 25 to 28.5 cm each time. A second, smaller marker that stays visible lower down is the likely remedy.
+- **The moving-pad landing is measured on one path at one speed.** The circle and faster pads run in the model and have not been measured in the simulator. The drone also trails a turning pad by up to 0.27 m higher up, which suggests it lags its commands more than the 0.4 s the controller allows for; that has not been tuned.
 - **The moving-pad landing relies on the autopilot's position**, which uses GPS, as a local reference. See "Design decisions".
 - **The moving pad stays level.** It slides east and north only. It cannot heave, roll or pitch.
 - **One marker size.** Below about 0.6 m the 1 m marker no longer fits in the image. A smaller marker for the final descent is planned.
@@ -348,7 +398,7 @@ These tests check the logic. They say little about real accuracy, because the dr
 | 4a | Pad that moves along a line or a circle, followed by the detector from a hover | Done |
 | 4b | Camera measurement corrected for the drone's tilt, checked in flight | Done |
 | 4c | Controller that matches the pad's speed and lands without LAND mode | Done |
-| 4d | Landing error on the moving pad, measured against pad speed | Planned |
+| 4d | Landing error on the moving pad, measured over repeated landings (line at 0.5 m/s) | Done |
 | 5 | GNSS switched off, estimator running on non-GPS sources | Planned |
 | 6 | Ship with wave motion (heave, roll, pitch) and touchdown timing | Planned |
 | 7 | Realism pass: sensor noise, latency, wind, batch runs with landing-error statistics | Planned |
@@ -372,6 +422,8 @@ drone-ship-landing/
     ├── config/camera_down.parm       autopilot parameters: camera straight down
     ├── tools/make_marker.py          regenerates the marker texture
     ├── tools/run_trials.sh           batches of landings with simulator restarts
+    ├── tools/run_moving_trials.sh    the same on the moving pad
+    ├── tools/analyze_moving_trials.py  summary and plot for the moving pad trials
     ├── tools/stop_sim.sh             stops the simulator and everything started with it
     ├── tools/analyze_tilt.py         summary and plot from a tilt check recording
     ├── tools/analyze_trials.py       summary and touchdown plot from trial CSVs
@@ -383,6 +435,7 @@ drone-ship-landing/
     ├── test/test_levelling.py        tests for the tilt correction and its analysis
     ├── test/test_pad_tracking.py     tests for following and landing on the moving pad
     ├── test/moving_pad_sim.py        the closed-loop model those tests fly in
+    ├── test/test_moving_trial_stats.py  tests for the moving pad trial statistics
     └── ship_landing/
         ├── flight_base.py            shared: connect, arm, take off, land, timeouts
         ├── takeoff_demo.py           takeoff, cruise and landing node
@@ -398,6 +451,8 @@ drone-ship-landing/
         ├── pad_detection.py          marker detection and pose estimate, no ROS
         ├── land_on_moving_pad.py     takeoff and landing on the moving pad, ROS node
         ├── pad_tracking.py           pad estimate and moving-pad landing decisions, no ROS
+        ├── moving_pad_trials.py      repeated moving-pad landings with ground-truth logging
+        ├── moving_trial_stats.py     statistics for those trials, no ROS
         ├── pad_mover.py              drives the moving pad, ROS node
         ├── pad_motion.py             path of the moving pad, no ROS
         └── ap_names.py               finds the autopilot's topic prefix

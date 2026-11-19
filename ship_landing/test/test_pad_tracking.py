@@ -54,6 +54,26 @@ def test_track_notices_a_change_of_pace():
     assert track.unsteadiness() > 0.06
 
 
+def test_track_says_when_the_pad_has_stopped_accelerating():
+    track = PadTrack()
+    # 5 s at steady speed, 4 s of braking through a turn-round, then steady again.
+    def position(t):
+        if t < 5.0:
+            return (0.5 * t, 0.0)
+        if t < 9.0:
+            return (2.5 + 0.5 * (t - 5.0) - 0.125 * (t - 5.0) ** 2, 0.0)
+        return (2.5 - 0.5 * (t - 9.0), 0.0)
+
+    last = feed(track, position, 4.9)
+    assert track.quiet_for() > 2.0                         # cruising
+    last = feed(track, position, 3.0, start=last + 0.1)    # 3 s into the turn-round
+    assert track.quiet_for() == 0.0
+    last = feed(track, position, 1.3, start=last + 0.1)    # the turn-round has only just ended
+    assert track.quiet_for() == 0.0                        # too early to trust the estimate
+    feed(track, position, 3.0, start=last + 0.1)
+    assert track.quiet_for() > 1.0
+
+
 def test_track_ignores_late_frames_and_restarts_after_a_long_gap():
     track = PadTrack()
     feed(track, lambda t: (t, 0.0), 2.0)
@@ -134,6 +154,31 @@ def test_still_reaches_the_pad_when_the_world_is_not_as_assumed(world):
 def test_matches_the_pads_speed_at_touchdown():
     results = landings(pattern='line', pad_speed=0.5)
     assert statistics.median(r.relative_speed for r in results) < 0.15
+
+
+def test_does_not_commit_while_the_pad_is_turning_round():
+    # Whenever a final descent starts on the line, the pad must not have been accelerating.
+    from ship_landing.pad_tracking import MovingPadLander as Lander
+    seen = []
+    original = Lander._enter
+
+    def spy(self, state, now, reason=''):
+        if state == 'FINAL':
+            seen.append(math.hypot(*self.track.accel))
+        original(self, state, now, reason)
+
+    Lander._enter = spy
+    try:
+        landings(pattern='line', pad_speed=0.5)
+    finally:
+        Lander._enter = original
+    assert seen and max(seen) < 0.08
+
+
+def test_a_pad_that_never_stops_accelerating_is_accepted_after_a_wait():
+    results = landings(pattern='circle', pad_speed=0.5)
+    assert all(r.state == 'LANDED' and r.on_pad for r in results)
+    assert statistics.mean(r.time for r in results) > 22.0      # it waited before committing
 
 
 def test_gives_up_when_the_pad_is_never_seen():

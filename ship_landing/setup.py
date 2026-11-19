@@ -49,6 +49,7 @@ setup(
             'pad_mover = ship_landing.pad_mover:main',
             'tilt_check = ship_landing.tilt_check:main',
             'land_on_moving_pad = ship_landing.land_on_moving_pad:main',
+            'moving_pad_trials = ship_landing.moving_pad_trials:main',
         ],
     },
 )

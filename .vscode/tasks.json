@@ -9,13 +9,13 @@
     "problemMatcher": [],
     "tasks": [
         {
-            "label": "Sim: start (pad world + detector)",
+            "label": "Sim: start static pad (pad world + detector)",
             "type": "shell",
             "command": "if pgrep -f '[g]z sim' >/dev/null; then echo 'A simulator is already running. Run the task \"Sim: stop everything\" first.'; exit 1; fi; source '${workspaceFolder}/env.sh' && cd \"$ARDU_WS\" && ros2 launch ship_landing pad_sim.launch.py",
             "isBackground": true
         },
         {
-            "label": "Sim: start with camera view",
+            "label": "Sim: start static pad with camera view",
             "type": "shell",
             "command": "if pgrep -f '[g]z sim' >/dev/null; then echo 'A simulator is already running. Run the task \"Sim: stop everything\" first.'; exit 1; fi; source '${workspaceFolder}/env.sh' && cd \"$ARDU_WS\" && ros2 launch ship_landing pad_sim.launch.py view:=true",
             "isBackground": true
@@ -32,7 +32,7 @@
             "command": "bash '${workspaceFolder}/ship_landing/tools/stop_sim.sh'"
         },
         {
-            "label": "Fly: land on pad",
+            "label": "Fly: land on static pad (static pad world must be running)",
             "type": "shell",
             "command": "source '${workspaceFolder}/env.sh' && ros2 run ship_landing land_on_pad --ros-args -p use_sim_time:=true"
         },
@@ -57,14 +57,24 @@
             "command": "source '${workspaceFolder}/env.sh' && ros2 param set /pad_mover speed ${input:padSpeed}"
         },
         {
-            "label": "Measure: quick check (1 batch of 2 landings, simulator already running)",
+            "label": "Measure: static pad quick check (1 batch of 2 landings, simulator already running)",
             "type": "shell",
             "command": "source '${workspaceFolder}/env.sh' && ros2 run ship_landing landing_trials --ros-args -p use_sim_time:=true -p trials:=2 -p output:='${workspaceFolder}/results/quick_check.csv'"
         },
         {
-            "label": "Measure: full run (3 batches of 10 landings, starts its own simulator)",
+            "label": "Measure: static pad full run (3 batches of 10 landings, starts its own simulator)",
             "type": "shell",
             "command": "'${workspaceFolder}/ship_landing/tools/run_trials.sh' 3 10"
+        },
+        {
+            "label": "Measure: moving pad quick check (1 batch of 2 landings, starts its own simulator)",
+            "type": "shell",
+            "command": "bash '${workspaceFolder}/ship_landing/tools/run_moving_trials.sh' 1 2"
+        },
+        {
+            "label": "Measure: moving pad full run (3 batches of 10 landings, about an hour)",
+            "type": "shell",
+            "command": "bash '${workspaceFolder}/ship_landing/tools/run_moving_trials.sh' 3 10"
         },
         {
             "label": "Measure: tilt check (static pad world must be running)",
@@ -85,7 +95,7 @@
         {
             "label": "Run tests",
             "type": "shell",
-            "command": "cd '${workspaceFolder}/ship_landing' && python3 -m pytest test/test_pad_detection.py test/test_landing_control.py test/test_ground_truth.py test/test_trial_stats.py test/test_pad_motion.py test/test_levelling.py test/test_pad_tracking.py",
+            "command": "cd '${workspaceFolder}/ship_landing' && python3 -m pytest test/test_pad_detection.py test/test_landing_control.py test/test_ground_truth.py test/test_trial_stats.py test/test_pad_motion.py test/test_levelling.py test/test_pad_tracking.py test/test_moving_trial_stats.py",
             "group": { "kind": "test", "isDefault": true }
         }
     ],
