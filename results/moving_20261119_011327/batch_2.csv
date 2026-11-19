@@ -1,4 +1,0 @@
-batch,seed,trial,pattern,pad_speed,outcome,reason,start_east,start_north,wait,error_east,error_north,error,drone_z,pad_v_east,pad_v_north,pad_velocity_change,along,across,estimated_east,estimated_north,track_time,final_attempts,stop_delay,land_mode,detections
-batch2,2,1,line,0.5,landed,,7.683,1.748,0.68,0.008,-0.0078,0.0112,0.315,0.499,0.0,0.002,0.008,-0.0078,0.01,-0.013,21.4,1,2.3,0,212
-batch2,2,2,line,0.5,landed,,4.876,1.529,8.83,0.0193,0.0055,0.0201,0.315,0.5,-0.0,0.0,0.0193,0.0055,0.009,-0.015,30.9,1,1.9,0,269
-batch2,2,3,line,0.5,failed,Moving pad landing failed: the pad was not found,2.866,5.965,7.27,,,,,,,,,,,,,0,,0,41
