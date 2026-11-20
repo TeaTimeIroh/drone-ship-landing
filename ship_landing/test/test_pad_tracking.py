@@ -212,3 +212,19 @@ def test_on_the_pad_the_drone_asks_for_the_velocity_it_already_has():
     assert command.east == pytest.approx(-0.3, abs=0.02)
     assert command.north == pytest.approx(0.0, abs=0.02)
     assert command.up < 0.0
+
+
+def test_turn_rate_of_a_pad_on_a_circle():
+    """A pad going round a circle anticlockwise at 0.5 m/s, radius 1.5 m, turns at 1/3 rad/s."""
+    track = PadTrack()
+    for i in range(80):
+        t = 0.1 * i
+        angle = t / 3.0
+        track.update(t, 1.5 * math.cos(angle), 1.5 * math.sin(angle), 0.0)
+    assert track.turn_rate() == pytest.approx(1.0 / 3.0, abs=0.08)
+
+
+def test_no_steady_offset_on_a_circle():
+    """The drone must not ride a fixed distance ahead of a pad that keeps turning."""
+    results = landings(pattern='circle', pad_speed=0.5)
+    assert statistics.median(r.error for r in results) < 0.06

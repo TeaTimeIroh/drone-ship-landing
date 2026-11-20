@@ -8,8 +8,9 @@ on a fixed spot. This module does three things differently:
    detections that the caller has already placed in the autopilot's local frame.
 2. It commands the pad's estimated velocity plus a correction for the remaining offset
    (MovingPadLander), so that the offset goes to zero on a pad moving at steady speed.
-3. It flies all the way down. Below about 0.6 m the marker no longer fits in the image,
-   so the last stretch follows the estimate without new detections.
+3. It flies all the way down. The pad carries a small marker inside the large one, which
+   stays in view to about 0.15 m, so only the last moments follow the estimate without
+   new detections.
 
 Frame: east, north, up in metres, the same frame as the autopilot's position. Only
 differences within this frame matter, so a constant or slowly drifting error in the
@@ -125,6 +126,13 @@ class PadTrack:
             da = 0.0
         return tuple(self.velocity[i] + self.accel[i] * da for i in range(2))
 
+    def turn_rate(self):
+        """How fast the pad's direction of travel is turning, in rad/s, anticlockwise positive."""
+        speed_squared = self.velocity[0] ** 2 + self.velocity[1] ** 2
+        if speed_squared < 0.01:
+            return 0.0                   # too slow for a direction of travel
+        return (self.velocity[0] * self.accel[1] - self.velocity[1] * self.accel[0]) / speed_squared
+
     def unsteadiness(self, window=0.6):
         """How much the estimated acceleration has changed over the last `window` seconds, in m/s^2.
 
@@ -163,7 +171,9 @@ class MovingPadParams:
     cone_base: float = 0.15          # m, allowed offset at zero height while descending
     cone_slope: float = 0.10         # m of extra allowed offset per metre of height
     follow_hold: float = 1.0         # s inside the cone before the descent starts
-    commit_height: float = 0.85      # m, the drone waits at this height for a good moment to commit
+    commit_height: float = 0.30      # m, the drone waits at this height for a good moment to commit
+    approach_gain: float = 1.0       # 1/s, descent rate per metre still to go to the waiting height
+    commit_offset: float = 0.06      # m, the drone must be this well centred to commit
     commit_hold: float = 0.4         # s the pad must have been quiet, and the drone centred, before committing
     patience: float = 8.0            # s of waiting after which a pad that is still accelerating, but evenly, is accepted
     final_descent: float = 0.5       # m/s, rate of the committed descent
@@ -189,7 +199,7 @@ class MovingPadLander:
         SEARCH    hover until the pad has been seen often enough to know its velocity
         FOLLOW    catch up with the pad at constant height and stay over it
         DESCEND   keep following; come down while inside a cone that narrows with height
-        FINAL     committed descent, the last part without sight of the marker
+        FINAL     committed descent, a short drop from just above the pad
         CONTACT   on the pad (or about to be): go wherever the pad carries the drone, and press down
         FAILED    see `reason`
 
@@ -251,6 +261,8 @@ class MovingPadLander:
                 return Command()
 
         # From here on there is an estimate to steer by.
+        if self.state == 'FINAL' and age < 0.3:
+            self.use_accel = True        # the pad is in view, so its acceleration estimate is current
         target = self.track.predict(now, self.use_accel)
         east, north = target[0] - drone[0], target[1] - drone[1]
         self.offset = (east, north)
@@ -262,6 +274,14 @@ class MovingPadLander:
         if self.state == 'CONTACT':
             return self._contact_command()
 
+        # A steady bias turns with the pad: over a pad on a circle the drone sits, say, a
+        # little ahead of it all the way round. Turn what has been learnt so far by as
+        # much as the pad has turned. Kept in a fixed frame, the integral is always
+        # correcting for the direction the pad was travelling in a few seconds ago.
+        turn = self.track.turn_rate() * dt
+        cos, sin = math.cos(turn), math.sin(turn)
+        self.integral = [cos * self.integral[0] - sin * self.integral[1],
+                         sin * self.integral[0] + cos * self.integral[1]]
         # Catch-up velocity: proportional to the offset, plus a slow integral.
         # The integral is for a steady bias, such as the drone flying a little slower than
         # commanded. It is frozen while the pad changes speed, when the offset is not a bias.
@@ -307,10 +327,10 @@ class MovingPadLander:
 
         # DESCEND
         if self.height < p.commit_height - 0.15:
-            command.up = p.climb_rate                # a cancelled final descent: back up to where the marker is visible
+            command.up = p.climb_rate                # a cancelled final descent: back up to the waiting height
             return command
         if self.height <= p.commit_height:
-            # Wait here, just above where the marker goes out of view, for a good moment:
+            # Wait here, close above the pad with the small marker in view, for a good moment:
             # the drone centred and the pad not accelerating. The moments to avoid are the
             # ones just after the pad changes pace, because the estimate of its acceleration
             # is then out of date and the last stretch would be flown on it. A pad that
@@ -321,7 +341,7 @@ class MovingPadLander:
             quiet = self.track.quiet_for() >= p.commit_hold
             even = (now - self.waiting_since >= p.patience
                     and self.track.unsteadiness() < self.track.params.steady_change)
-            if not (inside and (quiet or even)):
+            if not (distance < p.commit_offset and (quiet or even)):
                 self.inside_since = None
             elif self.inside_since is None:
                 self.inside_since = now
@@ -331,7 +351,10 @@ class MovingPadLander:
                 command.up = -p.final_descent
             return command
         if inside:
-            command.up = -(p.descent_fast if self.height > p.slow_below else p.descent_slow)
+            rate = p.descent_fast if self.height > p.slow_below else p.descent_slow
+            # Ease off towards the waiting height. It is close above the pad, and a drone
+            # arriving at full rate overshoots by more than the room there is.
+            command.up = -min(rate, max(0.05, p.approach_gain * (self.height - p.commit_height)))
         return command
 
     def _final(self, now, drone, command, distance, age):

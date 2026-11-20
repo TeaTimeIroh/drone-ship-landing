@@ -3,7 +3,8 @@
 The drone model is shaped on a recorded flight (docs/tilt_check): it answers a
 velocity command after a short delay, with limited acceleration and a lag. The camera
 gives ten frames a second, some of them missing, each a little late, reading slightly
-long, and nothing once the camera is too close to the pad to see the whole marker.
+long, and nothing once the camera is too close to the pad to see even the small marker
+whole, or too far to the side of it.
 """
 import math
 import random
@@ -19,6 +20,7 @@ PAD_TOP = 0.12
 PAD_HALF = 0.625
 REST = 0.195           # drone origin above the surface it stands on
 CAMERA_DOWN = 0.10
+SMALL_MARKER_REACH = 0.11   # m from the pad centre to a corner of the small marker, which must be in the image
 
 
 @dataclass
@@ -35,7 +37,7 @@ class World:
     image_delay: tuple = (0.01, 0.15)
     range_scale: float = 1.02        # the detector reads this much long
     noise: float = 0.01              # m at zero height, grows with height
-    min_camera_height: float = 0.6   # m, below this the marker does not fit in the image
+    min_camera_height: float = 0.15  # m, below this not even the small marker can be relied on
     start: tuple = (0.0, 0.0, 5.0)
     camera_stops_at: float = math.inf
     camera_gap: tuple = None         # (from, to) in seconds with no frames at all
@@ -118,7 +120,8 @@ def fly(world, duration=150.0):
             camera_height = pos[2] - CAMERA_DOWN - PAD_TOP
             east, north = pad_world[0] - pos[0], pad_world[1] - pos[1]
             in_view = (camera_height >= world.min_camera_height
-                       and abs(east) < 1.4 * camera_height and abs(north) < 1.0 * camera_height)
+                       and abs(east) < 1.4 * camera_height - SMALL_MARKER_REACH
+                       and abs(north) < 1.0 * camera_height - SMALL_MARKER_REACH)
             if in_view and rng.random() >= world.frame_loss:
                 sigma = world.noise + 0.004 * camera_height
                 scale = world.range_scale

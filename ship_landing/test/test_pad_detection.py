@@ -80,3 +80,30 @@ def test_mirrored_marker_is_flagged():
     mirrored = cv2.flip(render((0.0, 0.0, 5.0)), 1)
     assert detector.detect(mirrored, K) is None
     assert detector.is_mirrored(mirrored)
+
+
+@pytest.mark.parametrize('height', [0.5, 0.4, 0.3, 0.2])
+def test_small_marker_takes_over_close_up(height):
+    """Too close for the large marker to fit in the image, the small one gives the pad centre."""
+    detector = PadDetector()
+    position = (0.03, -0.02, height)
+    detection = detector.detect(render(position, yaw_deg=25), K)
+    assert detection is not None
+    assert detection.marker_id != detector.marker_id and detection.marker_size == 0.16
+    assert np.linalg.norm(detection.position - np.array(position)) < 0.01
+
+
+def test_large_marker_alone_is_lost_close_up():
+    """Without the small marker the pad is not seen from 0.4 m: the gap the small marker closes."""
+    assert PadDetector(small_marker_id=None).detect(render((0.0, 0.0, 0.4), yaw_deg=25), K) is None
+
+
+def test_pad_is_seen_all_the_way_down():
+    """No height between 4 m and 0.2 m at which neither marker can be read, or read badly."""
+    detector = PadDetector()
+    for height in np.arange(4.0, 0.19, -0.1):
+        position = np.array([0.1 * height, -0.05 * height, height])
+        detection = detector.detect(render(position, yaw_deg=25, tilt_deg=8), K)
+        assert detection is not None, f'pad not seen from {height:.1f} m'
+        error = np.linalg.norm(detection.position - position)
+        assert error < 0.01 + 0.02 * height, f'{error:.3f} m error from {height:.1f} m'

@@ -58,10 +58,15 @@ class MarkerDetector(Node):
         image_topic = self.declare_parameter('image_topic', '/camera/image').value
         info_topic = self.declare_parameter('camera_info_topic', '/camera/camera_info').value
         marker_size = self.declare_parameter('marker_size', 1.0).value
-        marker_id = self.declare_parameter('marker_id', 0).value
+        marker_id = self.declare_parameter('marker_id', 16).value
+        small_size = self.declare_parameter('small_marker_size', 0.16).value
+        small_id = self.declare_parameter('small_marker_id', 3).value      # -1: the pad has one marker only
         self.publish_debug = self.declare_parameter('publish_debug_image', True).value
 
-        self.detector = PadDetector(marker_size=float(marker_size), marker_id=int(marker_id))
+        self.detector = PadDetector(
+            marker_size=float(marker_size), marker_id=int(marker_id),
+            small_marker_size=float(small_size), small_marker_id=int(small_id) if int(small_id) >= 0 else None)
+        self.recent_small = 0            # recent detections that came from the small marker
         self.camera_matrix = None
         self.dist_coeffs = None
         self.frames = 0
@@ -75,7 +80,8 @@ class MarkerDetector(Node):
         self.create_subscription(CameraInfo, info_topic, self.on_info, qos_profile_sensor_data)
         self.create_subscription(Image, image_topic, self.on_image, qos_profile_sensor_data)
         self.get_logger().info(
-            f'Looking for marker {marker_id} ({marker_size} m) in {image_topic}, OpenCV {cv2.__version__}')
+            f'Looking for marker {marker_id} ({marker_size} m) and, close up, marker {small_id} '
+            f'({small_size} m) in {image_topic}, OpenCV {cv2.__version__}')
 
     def on_info(self, msg):
         if self.camera_matrix is None:
@@ -99,6 +105,7 @@ class MarkerDetector(Node):
         if detection is not None:
             self.hits += 1
             self.recent_hits += 1
+            self.recent_small += detection.marker_id != self.detector.marker_id
             self.last = detection
             self.publish_pose(msg, detection)
         elif not self.warned_mirrored and self.detector.is_mirrored(gray):
@@ -130,7 +137,8 @@ class MarkerDetector(Node):
             centre = tuple(int(v) for v in detection.corners.mean(axis=0))
             cv2.drawMarker(bgr, centre, (0, 0, 255), cv2.MARKER_CROSS, 12, 2)
             x, y, z = detection.position
-            cv2.putText(bgr, f'x {x:+.2f}  y {y:+.2f}  z {z:.2f} m', (8, 20),
+            which = 'large' if detection.marker_id == self.detector.marker_id else 'small'
+            cv2.putText(bgr, f'{which}  x {x:+.2f}  y {y:+.2f}  z {z:.2f} m', (8, 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
         else:
             cv2.putText(bgr, 'no marker', (8, 20),
@@ -146,6 +154,7 @@ class MarkerDetector(Node):
 
     def report(self):
         recent, self.recent_hits = self.recent_hits, 0
+        small, self.recent_small = self.recent_small, 0
         if self.last is None:
             self.get_logger().info(f'{self.frames} frames, marker not seen yet')
         elif recent == 0:
@@ -155,7 +164,7 @@ class MarkerDetector(Node):
         else:
             x, y, z = self.last.position
             self.get_logger().info(
-                f'seen in {recent}/{LOG_EVERY_FRAMES} recent frames | right {x:+.2f} m, '
+                f'seen in {recent}/{LOG_EVERY_FRAMES} recent frames, {small} of them by the small marker | right {x:+.2f} m, '
                 f'down-image {y:+.2f} m, range along lens {z:.2f} m, sideways offset {np.hypot(x, y):.2f} m')
 
 
