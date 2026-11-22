@@ -5,6 +5,7 @@
 #   ship_landing/tools/run_trials.sh              3 batches of 10 landings
 #   ship_landing/tools/run_trials.sh 2 5          2 batches of 5
 #   GUI=false ship_landing/tools/run_trials.sh    without the Gazebo window (lighter)
+#   NAV=flow ship_landing/tools/run_trials.sh     GPS off, optical flow instead
 #
 # Results go to results/<date_time>/: one CSV per batch, the simulator logs,
 # summary.md and touchdowns.png. Stop with Ctrl+C; finished trials are kept.
@@ -12,6 +13,7 @@
 BATCHES="${1:-3}"
 TRIALS="${2:-10}"
 GUI="${GUI:-true}"
+NAV="${NAV:-gps}"
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$REPO/env.sh"
@@ -34,7 +36,7 @@ stop_simulator      # make sure nothing is left over from an earlier session
 for batch in $(seq 1 "$BATCHES"); do
     echo
     echo "=== Batch $batch of $BATCHES: starting the simulator ==="
-    (cd "$ARDU_WS" && exec ros2 launch ship_landing pad_sim.launch.py gui:="$GUI") > "$OUT/sim_$batch.log" 2>&1 &
+    (cd "$ARDU_WS" && exec ros2 launch ship_landing pad_sim.launch.py gui:="$GUI" nav:="$NAV") > "$OUT/sim_$batch.log" 2>&1 &
 
     # The trials node waits for the autopilot itself, so it can start straight away.
     ros2 run ship_landing landing_trials --ros-args -p use_sim_time:=true \

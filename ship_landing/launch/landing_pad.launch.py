@@ -16,7 +16,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
@@ -39,13 +39,21 @@ def generate_launch_description():
     # With camera_down.parm last, DDS_USE_NS was silently left at 0 and every topic
     # moved from /ap/v1/... to /ap/...
     sitl_params = pkg_sitl / 'config' / 'default_params'
-    defaults = ','.join(str(p) for p in (
-        sitl_params / 'copter.parm',
-        pkg_ardupilot_gazebo / 'config' / 'gazebo-iris-gimbal.parm',
-        pkg / 'config' / 'camera_down.parm',
-        sitl_params / 'dds_udp.parm',
-        sitl_params / 'dds_use_ns.parm',
-    ))
+
+    def defaults_with(*extra):
+        return ','.join(str(p) for p in (
+            sitl_params / 'copter.parm',
+            pkg_ardupilot_gazebo / 'config' / 'gazebo-iris-gimbal.parm',
+            pkg / 'config' / 'camera_down.parm',
+            *extra,
+            sitl_params / 'dds_udp.parm',
+            sitl_params / 'dds_use_ns.parm',
+        ))
+
+    # nav:=flow adds the file that switches GPS off and optical flow on.
+    defaults = PythonExpression([
+        "'", defaults_with(pkg / 'config' / 'optical_flow.parm'), "' if '",
+        LaunchConfiguration('nav'), "' == 'flow' else '", defaults_with(), "'"])
 
     gz_launch = str(pkg_ros_gz_sim / 'launch' / 'gz_sim.launch.py')
     gz_server = IncludeLaunchDescription(
@@ -81,6 +89,8 @@ def generate_launch_description():
                               description='World to load: landing_pad or moving_pad.'),
         DeclareLaunchArgument('gui', default_value='true', description='Open the Gazebo window.'),
         DeclareLaunchArgument('rviz', default_value='false', description='Open RViz.'),
+        DeclareLaunchArgument('nav', default_value='gps',
+                              description='What the autopilot navigates by: gps or flow (optical flow, GPS off).'),
         set_resource_path,
         gz_server,
         gz_gui,

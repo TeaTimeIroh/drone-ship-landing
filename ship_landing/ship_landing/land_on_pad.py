@@ -6,13 +6,21 @@ Needs the simulator and the marker detector running:
     ros2 run ship_landing land_on_pad --ros-args -p use_sim_time:=true
 
 Listens to landing_pad/pose from the detector and commands velocities in the drone's
-own frame. Below about 1 m, where the marker no longer fits in the image, it hands
-over to the autopilot's LAND mode for the last stretch.
+own frame. Below about 1 m it hands over to the autopilot's LAND mode for the last
+stretch.
+
+The camera is fixed to the drone, so when the drone leans the pad appears displaced,
+by more the higher the drone is. Each detection is therefore rotated by the drone's
+attitude at the moment the image was taken (levelling.py) before it is used. Without
+this the approach is steady from 5.3 m but swings back and forth over the pad from
+6.5 m: the lean made to chase the pad moves the pad in the image. `level:=false`
+switches the correction off.
 """
 from geometry_msgs.msg import PoseStamped
 
 from ship_landing.flight_base import FlightNode, run
 from ship_landing.landing_control import LandingParams, PadLander, offset_from_camera
+from ship_landing.levelling import AttitudeBuffer, levelled_offset
 
 LOG_PERIOD = 2.0    # s of simulation time between progress lines
 
@@ -23,6 +31,7 @@ LOG_PERIOD = 2.0    # s of simulation time between progress lines
 # about 2 cm forward. Set both to 0 to switch the correction off.
 CAMERA_FORWARD = 0.020
 CAMERA_LEFT = -0.010
+CAMERA_DOWN = 0.10     # the camera sits roughly this far below the drone's centre
 
 
 class LandOnPad(FlightNode):
@@ -43,6 +52,9 @@ class LandOnPad(FlightNode):
         )
         self.camera_forward = float(self.declare_parameter('camera_forward', CAMERA_FORWARD).value)
         self.camera_left = float(self.declare_parameter('camera_left', CAMERA_LEFT).value)
+        self.level = bool(self.declare_parameter('level', True).value)
+        self.attitudes = AttitudeBuffer()
+        self.unlevelled = 0         # detections used as they came, for want of an attitude
         self.lander = None
         self.lander_state = None
         self.new_offset = None      # a detection not yet given to the lander
@@ -50,10 +62,27 @@ class LandOnPad(FlightNode):
         self.last_log = None
         self.create_subscription(PoseStamped, 'landing_pad/pose', self.on_pad, 10)
 
+    def on_pose(self, msg):
+        super().on_pose(msg)
+        o = msg.pose.orientation
+        stamp = msg.header.stamp
+        self.attitudes.add(stamp.sec + stamp.nanosec * 1e-9, (o.x, o.y, o.z, o.w))
+
     def on_pad(self, msg):
         p = msg.pose.position
-        self.new_offset = self.last_offset = offset_from_camera(
-            p.x, p.y, p.z, self.camera_forward, self.camera_left)
+        stamp = msg.header.stamp
+        q = self.attitudes.at(stamp.sec + stamp.nanosec * 1e-9) if self.level else None
+        if q is not None:
+            offset = levelled_offset(p.x, p.y, p.z, q, self.camera_forward, self.camera_left, CAMERA_DOWN)
+        else:
+            # No attitude close enough in time to this image: use the detection as it came.
+            offset = offset_from_camera(p.x, p.y, p.z, self.camera_forward, self.camera_left)
+            if self.level:
+                self.unlevelled += 1
+                if self.unlevelled in (1, 50):
+                    self.get_logger().warn(
+                        f'{self.unlevelled} detection(s) without a matching attitude, used without tilt correction')
+        self.new_offset = self.last_offset = offset
 
     def describe(self):
         if self.last_offset is None:

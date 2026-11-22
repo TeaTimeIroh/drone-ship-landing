@@ -1,0 +1,37 @@
+# Fly without GPS: horizontal velocity from an optical flow sensor and a rangefinder.
+# Loaded by the launch files with nav:=flow. Based on ArduPilot's own
+# Tools/autotest/default_params/copter-optflow.parm.
+
+# No GPS: the simulated receiver is off and the autopilot is told none is fitted,
+# so it neither waits for a fix nor refuses to arm for lack of one.
+SIM_GPS1_ENABLE  0
+GPS1_TYPE        0
+
+# Simulated downward rangefinder (an analog one on pin 0, read up to 40 m).
+RNGFND1_TYPE     1
+RNGFND1_PIN      0
+RNGFND1_SCALING  12.12
+RNGFND1_MIN      0
+RNGFND1_MAX      40.00
+
+# Simulated optical flow sensor. SITL computes it from the drone's true velocity
+# over flat, still ground. It does not look at the scene, so it does not see the pad.
+SIM_FLOW_ENABLE  1
+FLOW_TYPE        10
+
+# Estimator sources: no horizontal position source, horizontal velocity from flow,
+# height from the barometer, heading from the compass.
+EK3_SRC1_POSXY   0
+EK3_SRC1_VELXY   5
+EK3_SRC1_POSZ    1
+EK3_SRC1_VELZ    0
+EK3_SRC1_YAW     1
+EK3_SRC_OPTIONS  0
+
+# Without GPS nothing tells the estimator where on Earth it starts, and position modes
+# such as GUIDED need a starting point. Give it SITL's start location
+# (AHRS_OPTIONS bit 4: use the recorded origin when not navigating by GPS).
+AHRS_OPTIONS     16
+AHRS_ORIGIN_LAT  -35.363262
+AHRS_ORIGIN_LON  149.165237
+AHRS_ORIGIN_ALT  584

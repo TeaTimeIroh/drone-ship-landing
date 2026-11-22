@@ -37,6 +37,7 @@ def generate_launch_description():
             'world': LaunchConfiguration('world'),
             'gui': LaunchConfiguration('gui'),
             'rviz': LaunchConfiguration('rviz'),
+            'nav': LaunchConfiguration('nav'),
         }.items(),
     )
     detector = Node(
@@ -87,6 +88,8 @@ def generate_launch_description():
                               description='World to load: landing_pad or moving_pad.'),
         DeclareLaunchArgument('gui', default_value='true', description='Open the Gazebo window.'),
         DeclareLaunchArgument('rviz', default_value='false', description='Open RViz.'),
+        DeclareLaunchArgument('nav', default_value='gps',
+                              description='What the autopilot navigates by: gps or flow (optical flow, GPS off).'),
         DeclareLaunchArgument('view', default_value='false',
                               description='Open the camera view with the detection drawn on it.'),
         DeclareLaunchArgument('pattern', default_value='line',
