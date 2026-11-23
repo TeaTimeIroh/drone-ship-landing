@@ -2,7 +2,7 @@
 
 Simulated autonomous landing of a multirotor on a moving platform aboard a moving ship, without GNSS in the final design. Built to learn the ROS 2, ArduPilot and Gazebo stack end to end, with the simulation kept as close to a real system as a desktop setup allows.
 
-**Status: early.** The drone takes off, finds a landing marker with its downward camera, flies over it and lands on it, all commanded from ROS 2 nodes. Over 30 landings from random start points it touched down a median of 1.5 cm from the pad centre, measured against the simulator's ground truth. That is on a static pad with GPS still on. In a second world the pad moves back and forth at 0.5 m/s, and the drone follows it down and lands on it: 30 of 30 landings were on the pad, with a median error of 2.1 cm. Two of them were 17 and 23 cm off, when the pad began to turn round just as the drone committed. On a circle, 30 of 30 landed with a median error of 3.1 cm. The ship and GNSS-denied navigation are not implemented. See the roadmap.
+**Status: early.** The drone takes off, finds a landing marker with its downward camera, flies over it and lands on it, all commanded from ROS 2 nodes. Over 30 landings from random start points it touched down a median of 1.5 cm from the pad centre, measured against the simulator's ground truth. That is on a static pad with GPS still on. In a second world the pad moves back and forth at 0.5 m/s, and the drone follows it down and lands on it: 30 of 30 landings were on the pad, with a median error of 2.1 cm. Two of them were 17 and 23 cm off, when the pad began to turn round just as the drone committed. On a circle, 30 of 30 landed with a median error of 3.1 cm. With GPS switched off and a simulated optical flow sensor in its place, the static-pad landing is as accurate as with GPS (median 1.2 cm over 30 landings); the moving pad has not been flown without GPS yet. The ship is not implemented. See the roadmap.
 
 ![Drone landing on the marker pad](docs/demo.gif)
 
@@ -33,7 +33,11 @@ If the marker is lost for a few seconds the drone climbs to widen its view, and 
 
 The `landing_pad` world is the ArduPilot runway with a 1.25 m pad carrying a 1.0 m marker, placed 3 m east and 2 m north of the take-off point. The `moving_pad` world has the same pad on a cart, described below. The camera is the Iris model's gimbal camera, held pointing straight down by autopilot parameters in `config/camera_down.parm`.
 
-`levelling.py` corrects the camera's view for the drone's tilt. The camera is fixed to the body, so when the drone rolls or pitches a pad straight below appears off to one side: at 5 m height, 10 degrees of tilt moves it by almost 0.9 m. Each detection is rotated by the attitude the autopilot reported for the moment the image was taken, which gives the pad's offset in a frame that stays level. This is checked in flight (see "Numbers"). The moving-pad landing uses it; the static-pad landing does not need it and is unchanged.
+`levelling.py` corrects the camera's view for the drone's tilt. The camera is fixed to the body, so when the drone rolls or pitches a pad straight below appears off to one side: at 5 m height, 10 degrees of tilt moves it by almost 0.9 m. Each detection is rotated by the attitude the autopilot reported for the moment the image was taken, which gives the pad's offset in a frame that stays level. This is checked in flight (see "Numbers"). Both landings use it. The static-pad landing went without it until step 5, when a higher starting height showed that it needs it (see "Without GPS" under "Numbers").
+
+Without GPS, the autopilot takes its horizontal velocity from an optical flow sensor and a rangefinder, both simulated by ArduPilot's SITL. `config/optical_flow.parm` switches GPS off, switches the two sensors on, tells the estimator to use flow for velocity and nothing for horizontal position, and gives it a starting location, which GPS normally supplies. The launch files load it with `nav:=flow`. Nothing in the ROS nodes changes: they still command velocities and read the autopilot's local position, which now comes from adding up flow velocity.
+
+`nav_check` and `response_check` compare the autopilot's picture of its own motion with Gazebo's truth. The first flies a square and a hover and compares positions at each corner. The second records how the drone's true speed follows a velocity command. Both exist to answer "is the replacement for GPS as good as GPS here", and both turned out useful for ruling explanations out.
 
 `pad_mover` drives the cart in the `moving_pad` world. The pad hangs from the world on two sliding joints, one east-west and one north-south, and each joint is driven at a commanded speed, so the joints decide where the pad is and a drone standing on it is carried along by friction. The node sends the two speeds for a path, either a line (2.5 m each way at 0.5 m/s by default, slowing down to turn round) or a circle, and reads the true joint positions back from Gazebo to stay on the path. The path generator is in `pad_motion.py`, without ROS, with its own tests.
 
@@ -86,6 +90,68 @@ This supports the camera-position explanation but does not prove it. The drone f
 Batch 2 of run 2 was tighter than the other two (mean 1.0 cm against 1.5 and 1.4). With ten landings per batch I would not read anything into that.
 
 The detector's range matched the true height of the drone above the pad within 0.4% in both runs (ratio 0.996 to 1.004). The camera hangs about 0.1 m below the point Gazebo reports, so the detector actually reads about 2% long at 5 m, in line with the synthetic tests.
+
+### Without GPS
+
+Step 5 switched GPS off and put a simulated optical flow sensor and rangefinder in its place. All flights below are on the static pad.
+
+**What the autopilot does without GPS and without a replacement:**
+
+| Test | Result |
+|---|---|
+| Arm on the ground | Refused: `Arm: GPS 1: Bad fix` |
+| Lose GPS while hovering | `EKF3 stopped aiding`, then no reaction and about 2 cm of drift in the 31 s the flight had left |
+| Whether it acts after its 30 s dead-reckoning timeout | Not settled; the one longer flight could not confirm that GPS was off |
+
+The 2 cm is a property of the simulation, not of flying without GPS. The simulated inertial sensors are close to perfect; a real drone on inertial sensors alone drifts by metres in that time.
+
+**Is flow as good as GPS here?** The same check flight in both setups, against Gazebo's truth:
+
+| | With GPS | With optical flow |
+|---|---|---|
+| Distance the autopilot believes it flew / distance flown, four 6 m legs | 1.00 | 1.00 |
+| Position error after the square and a 60 s hover | 4 cm | 6 cm |
+| Drift during the 60 s hover | 1 cm | under 1 cm |
+| Time to reach half of a commanded 1 m/s | 0.63 s | 0.60 to 0.66 s |
+| Peak speed on that command | 1.07 to 1.08 m/s | 1.07 to 1.08 m/s |
+| Distance to stop from 1 m/s | 0.61 to 0.64 m | 0.65 to 0.68 m |
+| Autopilot's speed behind the true speed | 0.05 s | 0.05 s |
+| True height held, target 5 m | 5.12 m | 6.32 m |
+
+In everything but height the two are the same. The height is not an estimation error: the autopilot reports 6.33 m and holds it on purpose. Why it aims 1.2 m higher once a rangefinder is fitted is not explained (see "Known limitations").
+
+**Landing accuracy,** 3 batches of 10 landings each, same procedure and start points as the runs above:
+
+| | GPS, before step 5 | GPS, tilt-corrected | Optical flow, tilt-corrected |
+|---|---|---|---|
+| Landings attempted / completed | 30 / 30 | 30 / 30 | 30 / 30 |
+| Median error | 1.5 cm | 1.3 cm | 1.2 cm |
+| Mean error | 1.3 cm | 1.2 cm | 1.2 cm |
+| 95th percentile | 2.1 cm | 2.1 cm | 2.5 cm |
+| Worst | 2.4 cm | 2.2 cm | 2.5 cm |
+| Average miss | 0.3 cm west, 0.0 cm south | 0.5 cm west, 0.3 cm north | 0.2 cm west, 0.6 cm north |
+| Start point to touchdown | mean 17.4 s | mean 16.7 s | mean 19.0 s |
+
+![Touchdown points without GPS](docs/landing_trials/flow/touchdowns.png)
+
+Without GPS the landing is as accurate as with it. The flow landings take about 2 s longer because they start 1.2 m higher.
+
+What this does and does not show. The camera does the centring in both cases, and the last metre is flown by the autopilot's LAND mode, which now holds position on flow instead of GPS; the result says that hand-over still works. It does not say much about optical flow as a sensor. SITL computes the flow reading from the drone's true velocity over flat, still ground, without noise that depends on the surface, and without looking at the scene. A real flow sensor over a marker pad, a deck or water would be worse, and over a moving pad it would report speed relative to the pad.
+
+**An instability found on the way.** The first landing without GPS reached the pad but swung back and forth over it for most of a minute first. Three explanations were tested and ruled out by measurement before the fourth held:
+
+| Explanation | Test | Outcome |
+|---|---|---|
+| Flow gives a wrong speed, so the drone overshoots | Square flight against Gazebo | Ruled out: distance ratio 1.00 |
+| The estimator misjudges its height, scaling the speed | Same flight | Ruled out: reported and true height agree |
+| The estimate lags behind the true motion with flow | Recorded response to velocity steps | Ruled out: 0.05 s in both setups |
+| The start height itself, 6.5 m instead of 5.3 m | GPS from 6.5 m; flow from 5.3 m | Held: GPS from 6.5 m swung up to 1.25 m either side; flow from 5.3 m flew straight in |
+
+The static-pad landing did not correct for the camera tilting with the drone. A lean shifts where the pad appears, by more the higher the drone is, and the lean made to chase the pad moves the pad in the image. Below about 6 m the loop stays calm; above it, it does not. Every flight before step 5 started from 5.3 m, just under the threshold, and optical flow exposed the weakness only by making the drone climb higher. With the tilt correction from step 4b applied, the same flight from 6.5 m was 0.15 m off when it began descending and within 2 cm from there down.
+
+A simplified model with a gentle drone did not reproduce this at any height. One shaped on the measured response (a delay, then a quick rise) did, though with the threshold nearer 8 m than 6 m, and showed the corrected landing steady from every height.
+
+The check flights are in `docs/response/`, the landing runs in `docs/landing_trials/gps_levelled/` and `docs/landing_trials/flow/`.
 
 ### Tilt correction
 
@@ -198,6 +264,8 @@ What the static-pad landing numbers do not show: the pad was static, there was n
 - **The pad's acceleration is estimated, not only its velocity.** A velocity-only filter always runs behind a pad that turns: in the model it missed by 0.4 m on a circle, against about 0.11 m with acceleration. The cost is more noise on a static pad (about 3 cm against 1 cm in the model).
 - **Two markers, one inside the other.** The pad has no room beside the large marker, and the centre is where the drone ends up. The large marker's four middle cells form a 0.33 m square; with an ID whose middle cells are white (only 16 and 45 in this dictionary), a 0.16 m marker fits there with a white margin of its own and the large one still reads. On rendered images the pad was read in every frame from 8 m down to 0.2 m. A 0.2 m inner marker disturbed the large one more from far away and was lost sooner close up.
 - **The learnt correction turns with the pad.** See the circle result under "Numbers". A steady offset relative to a moving target is steady in the target's frame, not in the world's.
+- **Optical flow first, among the ways to fly without GPS.** The landing needs two things from the autopilot: to follow velocity commands, and a local position that is steady over a few seconds. Neither needs an absolute position. Flow with a rangefinder gives velocity directly, is what a small real drone would carry, and needed only a parameter file. The alternatives considered: feeding the marker's position in as external navigation, which works only while the marker is in view and reports a frame that moves with the pad; and visual-inertial odometry from the camera, which is heavy to set up and has little to hold on to over water. The first is kept as a comparison for later.
+- **Check the replacement against truth before trusting a landing with it.** Two small flights compare the autopilot's own position and speed with Gazebo's. They cost an evening and removed three wrong explanations.
 - **Logic separated from ROS.** Detection (`pad_detection.py`) and the landing decisions (`landing_control.py`) are plain Python. The ROS nodes only move messages in and out, so the logic can be tested without a simulator.
 - **No `cv_bridge`.** Images are converted to NumPy arrays by hand, which avoids a binary dependency that breaks when the system and pip versions of OpenCV and NumPy differ.
 - **The moving pad is driven through joints, not teleported or pushed.** Setting the pad's pose repeatedly is simpler, but a drone standing on a teleported pad is not carried along. A free pad pushed by forces can drift, tip or be shoved by the landing. Speed-driven joints give an exact, repeatable path and real contact with the drone. The cost is that this pad cannot heave or tilt, so the ship in step 6 needs a different mechanism.
@@ -255,6 +323,14 @@ sudo timedatectl set-ntp false
 
 **Waiting close above the pad needs a gentle arrival.** With the waiting height at 0.30 m, a sluggish drone in the model overshot the height and touched the pad before committing. The descent rate now falls off with the distance still to go.
 
+**A weakness can sit just under the conditions you always test in.** The static-pad landing was measured over 60 landings and looked finished. All of them started from 5.3 m. It turned unstable a metre higher, and nothing in those 60 landings hinted at it. The cause, the uncorrected camera tilt, was listed under "Known limitations" as something the landing "relies on low speeds" to get away with.
+
+**Three plausible explanations in a row were wrong.** When the first landing without GPS wandered, the new sensor was the obvious suspect, and it was blamed in three different ways. Each was cheap to test against Gazebo's truth and each test said no. What remained was the one thing that differed and had nothing to do with navigation: the starting height. Changing one thing at a time, GPS at the new height and flow at the old one, settled it in two flights.
+
+**A perfect simulated sensor makes a hard problem look solved.** Losing GPS in flight cost 2 cm of drift in half a minute, and optical flow matched GPS to the centimetre. Both say more about the simulated sensors than about flying without GPS. The numbers are reported as measured, with that caveat next to them.
+
+**Adding a rangefinder changed what "take off to 5 m" means.** The drone climbed to 6.3 m instead of 5.3 m and held it knowingly. ArduCopter measures a GUIDED takeoff height against the terrain when a rangefinder is available, which is the likely reason, but Mission Planner showed a rangefinder reading of zero throughout and the cause is not pinned down.
+
 **The autopilot's position is measured from home, and home moves when the motors are armed.** `pose/filtered` is relative to home, and ArduCopter resets home at every arming. The moving-pad trials re-arm on the pad, so from the second landing on, every position was measured from a different spot, and start points given in world coordinates ended up metres away. The landing itself did not care, since it only uses differences, which is why the fault survived two runs: it showed only as start points at the edge of the camera's view and two "pad was not found" failures that happened to be the two northernmost start points. The trials now tie the autopilot's frame to the world before each flight, using the drone's known position on the ground.
 
 **Restarting the pad synchronised it with the trial.** Each trial sets the stopped pad moving again and then lands some fairly constant time later, so the pad was always at a similar point of its path at touchdown. In a rehearsal against a stand-in autopilot, all three landings fell during a turn-around. The random wait before each landing now spans a full leg of the pad's path.
@@ -290,6 +366,14 @@ ros2 launch ship_landing pad_sim.launch.py
 ```
 
 Add `view:=true` to also open the camera view with the detection drawn on it. `landing_pad.launch.py` starts the simulator alone, without the detector.
+
+Add `nav:=flow` to fly without GPS, on simulated optical flow:
+
+```bash
+ros2 launch ship_landing pad_sim.launch.py nav:=flow
+```
+
+Values written from Mission Planner are saved by the autopilot and override the parameter files on later starts.
 
 For the moving pad, add `world:=moving_pad`. This also starts `pad_mover`:
 
@@ -394,6 +478,7 @@ With the repository folder open in VS Code (WSL), the same commands are availabl
 |------|--------------|
 | Sim: start static pad | Simulator, autopilot and detector |
 | Sim: start static pad with camera view | The same, plus the camera view |
+| Sim: start static pad without GPS (optical flow) | The same, with GPS off and optical flow on |
 | Sim: start moving pad | The moving pad world with the camera view; asks for line or circle |
 | Sim: stop everything | Stops the simulator and any leftover processes, and lists any that survive |
 | Fly: land on static pad | Marker-guided landing |
@@ -403,9 +488,12 @@ With the repository folder open in VS Code (WSL), the same commands are availabl
 | Pad: set speed | Changes the moving pad's speed; 0 stops it |
 | Measure: static pad quick check | Two landings with the simulator already running |
 | Measure: static pad full run | Three batches of ten landings, starting its own simulator |
+| Measure: static pad full run without GPS | The same on optical flow |
 | Measure: moving pad quick check | Two landings on the moving pad, starting its own simulator |
 | Measure: moving pad full run | Three batches of ten landings on the moving pad |
 | Measure: tilt check | Swinging flight near the static pad, then the tilt correction summary |
+| Check: navigation against Gazebo | Flies a square and a hover, compares the autopilot's position with the truth |
+| Check: response to velocity commands | Records how the true speed follows a command, then summarises it |
 | Check: where is the drone | True position from Gazebo |
 | Build package | `colcon build` for this package (Ctrl+Shift+B) |
 | Run tests | The pytest suite |
@@ -424,9 +512,13 @@ These tests check the logic. They say little about real accuracy, because the dr
 ## Known limitations and roadmap
 
 - **Runs slower than real time.** On WSL2 with an RTX 3060 the simulation runs at roughly 0.5 to 0.8 times real time. ArduPilot and Gazebo advance in lockstep, so flight behaviour is unaffected, but it makes every test slower.
-- **GPS is still in use.** The GNSS-denied part of the project starts at step 5.
-- **The camera is fixed to the body, not stabilised.** When the drone tilts to accelerate, the pad appears displaced in the image. The moving-pad landing corrects for this with the drone's attitude, verified in flight. The static-pad landing does not, and relies on low speeds and on the error shrinking as the drone gets lower. On a real aircraft the correction would also inherit the error of the attitude estimate.
-- **The last metre is flown blind.** Below about 1 m the autopilot's LAND mode takes over and holds position using GPS, so the final accuracy still depends on GPS.
+- **Without GPS, only the static pad has been flown.** The moving-pad landing still runs with GPS on. Its pad tracking uses the autopilot's local position, which optical flow also provides, but that is not measured yet.
+- **The simulated optical flow sensor is ideal.** SITL computes it from the drone's true velocity over flat, still ground. It has no surface-dependent noise and does not see the pad, the deck or water. Over a moving pad a real sensor would report speed relative to the pad.
+- **With the rangefinder fitted the drone climbs 1.2 m higher than asked**, to 6.3 m for a 5 m target, and the cause is not pinned down.
+- **What the autopilot does about a lost GPS after its 30 s timeout is not established.**
+- **One landing handed over to LAND mode at 1.45 m instead of 1.0 m** because the detector went quiet for a moment around 1.5 m. How often that happens has not been counted.
+- **The camera is fixed to the body, not stabilised.** When the drone tilts to accelerate, the pad appears displaced in the image. Both landings correct for this with the drone's attitude, verified in flight. On a real aircraft the correction would also inherit the error of the attitude estimate.
+- **The last metre of the static-pad landing is flown by the autopilot.** Below about 1 m LAND mode takes over and holds position on GPS or optical flow, so the final accuracy depends on that source.
 - **Landing accuracy is measured only in easy conditions.** See "Numbers" for what the trials leave out.
 - **The camera-position correction is checked at one heading only.** It removed a constant 2 cm offset in landings facing north. Whether it holds at other headings has not been measured.
 - **Range is biased when the marker is small.** In the synthetic tests the position is good to a few centimetres within 5 m. Beyond about 8 m the marker is roughly 20 pixels wide and the range reads up to 5% long, while the direction stays within a degree. In the simulator, hovering at 5 m with the pad 3.61 m to the side, the detector reported a sideways offset of 3.67 m and found the marker in essentially every frame. The landing trials later checked range against the simulator's ground truth at 5 m; see "Numbers".
@@ -435,7 +527,7 @@ These tests check the logic. They say little about real accuracy, because the dr
 - **A circle at 1.0 m/s never lands** in the model: the pad's acceleration is beyond what the filter tracks, and the drone waits. Not tried in the simulator.
 - **The drone waits with about 0.2 m under its legs.** Gazebo here models no ground effect or rotor wash off the pad; a real drone would need more room or a different final approach.
 - **The moving-pad landing is measured at one speed.** Faster pads run in the model and have not been measured in the simulator. The drone also trails a turning pad by up to 0.27 m higher up, which suggests it lags its commands more than the 0.4 s the controller allows for; that has not been tuned.
-- **The moving-pad landing relies on the autopilot's position**, which uses GPS, as a local reference. See "Design decisions".
+- **The moving-pad landing relies on the autopilot's position** as a local reference, so far with GPS. See "Design decisions".
 - **The moving pad stays level.** It slides east and north only. It cannot heave, roll or pitch.
 - **The large marker is unreadable below about 0.6 m and the small one below about 0.15 m.** With the drone standing on the pad the small marker was still read, 0.09 m from the lens, but the rendered-image tests put reliable reading at 0.15 m.
 - **No hardware validation.** Nothing here has flown on a real vehicle. The project reduces known contributors to the sim-to-real gap; it cannot measure the gap itself.
@@ -453,7 +545,10 @@ These tests check the logic. They say little about real accuracy, because the dr
 | 4c | Controller that matches the pad's speed and lands without LAND mode | Done |
 | 4d | Landing error on the moving pad, measured over repeated landings (line and circle at 0.5 m/s) | Done |
 | 4e | A second, smaller marker so the pad stays in view down to touchdown, and the landing logic revised to use it | Done |
-| 5 | GNSS switched off, estimator running on non-GPS sources | Planned |
+| 5a | GPS switched off with nothing in its place: what the autopilot does | Done |
+| 5b | Optical flow in place of GPS: checked against truth, static-pad landing measured | Done |
+| 5c | Moving-pad landing without GPS, measured against step 4e | Planned |
+| 5d | Marker-based external navigation as a comparison, if 5c leaves a reason to | Planned |
 | 6 | Ship with wave motion (heave, roll, pitch) and touchdown timing | Planned |
 | 7 | Realism pass: sensor noise, latency, wind, batch runs with landing-error statistics | Planned |
 
@@ -474,12 +569,14 @@ drone-ship-landing/
     ├── models/aruco_pad/             the static pad model and its marker texture
     ├── models/moving_pad/            the pad on two sliding joints
     ├── config/camera_down.parm       autopilot parameters: camera straight down
+    ├── config/optical_flow.parm      autopilot parameters: GPS off, optical flow on
     ├── tools/make_marker.py          regenerates the marker texture
     ├── tools/run_trials.sh           batches of landings with simulator restarts
     ├── tools/run_moving_trials.sh    the same on the moving pad
     ├── tools/analyze_moving_trials.py  summary and plot for the moving pad trials
     ├── tools/stop_sim.sh             stops the simulator and everything started with it
     ├── tools/analyze_tilt.py         summary and plot from a tilt check recording
+    ├── tools/analyze_response.py     summary from a response check recording
     ├── tools/analyze_trials.py       summary and touchdown plot from trial CSVs
     ├── test/test_pad_detection.py    tests for the detection code
     ├── test/test_landing_control.py  closed-loop tests for the landing logic
@@ -501,6 +598,9 @@ drone-ship-landing/
         ├── levelling.py              tilt correction of the camera's view, no ROS
         ├── tilt_check.py             flight that records data to check the tilt correction
         ├── tilt_analysis.py          analysis of that recording, no ROS
+        ├── nav_check.py              flight comparing the autopilot's position with Gazebo's
+        ├── response_check.py         flight recording the response to velocity commands
+        ├── response_analysis.py      analysis of that recording, no ROS
         ├── marker_detector.py        camera image to marker position, ROS node
         ├── pad_detection.py          marker detection and pose estimate, no ROS
         ├── land_on_moving_pad.py     takeoff and landing on the moving pad, ROS node
