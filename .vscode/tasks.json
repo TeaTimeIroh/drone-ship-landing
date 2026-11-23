@@ -29,7 +29,7 @@
         {
             "label": "Sim: start moving pad (pad world + detector + pad motion)",
             "type": "shell",
-            "command": "if pgrep -f '[g]z sim' >/dev/null; then echo 'A simulator is already running. Run the task \"Sim: stop everything\" first.'; exit 1; fi; source '${workspaceFolder}/env.sh' && cd \"$ARDU_WS\" && ros2 launch ship_landing pad_sim.launch.py world:=moving_pad view:=true pattern:=${input:padPattern}",
+            "command": "if pgrep -f '[g]z sim' >/dev/null; then echo 'A simulator is already running. Run the task \"Sim: stop everything\" first.'; exit 1; fi; source '${workspaceFolder}/env.sh' && cd \"$ARDU_WS\" && ros2 launch ship_landing pad_sim.launch.py world:=moving_pad view:=true pattern:=${input:padPattern} nav:=${input:navSource}",
             "isBackground": true
         },
         {
@@ -80,12 +80,12 @@
         {
             "label": "Measure: moving pad quick check (1 batch of 2 landings, starts its own simulator)",
             "type": "shell",
-            "command": "bash '${workspaceFolder}/ship_landing/tools/run_moving_trials.sh' 1 2"
+            "command": "PATTERN=${input:padPattern} NAV=${input:navSource} bash '${workspaceFolder}/ship_landing/tools/run_moving_trials.sh' 1 2"
         },
         {
             "label": "Measure: moving pad full run (3 batches of 10 landings, about an hour)",
             "type": "shell",
-            "command": "bash '${workspaceFolder}/ship_landing/tools/run_moving_trials.sh' 3 10"
+            "command": "PATTERN=${input:padPattern} NAV=${input:navSource} bash '${workspaceFolder}/ship_landing/tools/run_moving_trials.sh' 3 10"
         },
         {
             "label": "Measure: tilt check (static pad world must be running)",
@@ -123,6 +123,13 @@
         }
     ],
     "inputs": [
+        {
+            "id": "navSource",
+            "type": "pickString",
+            "description": "What the autopilot navigates by",
+            "options": ["gps", "flow"],
+            "default": "gps"
+        },
         {
             "id": "navLabel",
             "type": "pickString",
