@@ -87,6 +87,7 @@ class FlightNode(Node):
     def connect(self, prefix):
         """Create the publishers, subscribers and service clients under the autopilot's prefix."""
         self.get_logger().info(f'Autopilot interface found at {prefix}')
+        self.prefix = prefix        # for nodes that add topics of their own
         self.create_subscription(PoseStamped, f'{prefix}/pose/filtered',
                                  self.on_pose, qos_profile_sensor_data)
         self.create_subscription(Status, f'{prefix}/status', self.on_status, qos_profile_sensor_data)

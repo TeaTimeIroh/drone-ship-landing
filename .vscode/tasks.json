@@ -105,6 +105,12 @@
             "problemMatcher": []
         },
         {
+            "label": "Check: steering by stick positions (ALT_HOLD, records a short flight)",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && cd '${workspaceFolder}' && ros2 run ship_landing stick_check --ros-args -p use_sim_time:=true -p output:=results/stick_check && python3 ship_landing/tools/analyze_sticks.py results/stick_check",
+            "problemMatcher": []
+        },
+        {
             "label": "Check: where is the drone",
             "type": "shell",
             "command": "source '${workspaceFolder}/env.sh' && gz model -m iris -p 2>/dev/null | tail -n 3 && echo 'pad centre is at x = 3, y = 2'"

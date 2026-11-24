@@ -50,6 +50,7 @@ setup(
             'tilt_check = ship_landing.tilt_check:main',
             'nav_check = ship_landing.nav_check:main',
             'response_check = ship_landing.response_check:main',
+            'stick_check = ship_landing.stick_check:main',
             'land_on_moving_pad = ship_landing.land_on_moving_pad:main',
             'moving_pad_trials = ship_landing.moving_pad_trials:main',
         ],
