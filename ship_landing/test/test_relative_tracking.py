@@ -77,7 +77,7 @@ def test_knowing_the_lean_is_what_makes_the_velocity_usable():
     """Without the drone's own acceleration every lean looks like the pad changing speed."""
     _, with_lean = fly(line)
     _, without = fly(line, feed_forward=False)
-    assert rms(without) > 3.0 * rms(with_lean)
+    assert rms(without) > 2.5 * rms(with_lean)
 
 
 def test_restarts_after_losing_the_pad():

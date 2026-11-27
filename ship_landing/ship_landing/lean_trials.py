@@ -21,7 +21,7 @@ from pathlib import Path
 from ship_landing.flight_base import run
 from ship_landing.land_by_leaning import LandByLeaning
 from ship_landing.lean_landing import LandingParams, LeanLander
-from ship_landing.moving_trial_stats import COLUMNS, travel_frame
+from ship_landing.moving_trial_stats import COLUMNS, EARLY_CONTACT, travel_frame
 from ship_landing.relative_tracking import RelativeTrack
 
 GOTO_GAIN = 0.8             # 1/s
@@ -178,6 +178,8 @@ class LeanTrials(LandByLeaning):
             row['outcome'] = 'landed' if result['on_pad'] else 'missed'
             if not result['on_pad']:
                 row['reason'] = row['reason'] or 'touched down off the pad'
+            elif self.lander.touched_early:
+                row['reason'] = EARLY_CONTACT
         self.write_row()
         if row['outcome'] == 'landed':
             self.errors.append(row['error'])

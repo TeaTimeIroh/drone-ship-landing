@@ -131,7 +131,11 @@ class Landing:
     seed: int = 0
     lean_lag: float = 0.27
     stick_delay: float = 0.08
-    climb_lag: float = 0.30          # s, how quickly the climb rate follows the throttle stick
+    climb_lag: float = 0.5           # s, how quickly the climb rate follows the throttle stick
+    climb_delay: float = 0.15        # s before it starts to
+    climb_accel: float = 0.2         # m/s^2, and no faster than this: in the step 5d flights a 0.5 m/s descent
+    #                                  took about 3 s to stop
+    sink_accel: float = 0.0          # m/s^2 downwards if different (a descent from a hover built up faster, 0.45)
     camera_delay: float = 0.10
     noise_per_metre: float = 0.003
     frame_loss: float = 0.15
@@ -167,6 +171,7 @@ def land(sim):
     height, climb = sim.height, 0.0
     lean = [0.0, 0.0]
     sticks, applied, stick_queue, frames = (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), [], []
+    throttle_queue, throttle_now = [], 0.0
 
     def lean_for(stick):
         if abs(stick) <= sim.true_dead_zone:
@@ -193,7 +198,13 @@ def land(sim):
             accel = thrust[i] - sim.drag * velocity[i]
             position[i] += velocity[i] * DT + 0.5 * accel * DT * DT
             velocity[i] += accel * DT
-        climb += (rate_for(applied[2]) - climb) * DT / sim.climb_lag
+        throttle_queue.append((t + sim.climb_delay, applied[2]))
+        while throttle_queue and throttle_queue[0][0] <= t:
+            _, throttle_now = throttle_queue.pop(0)
+        vertical = (rate_for(throttle_now) - climb) / sim.climb_lag
+        if sim.climb_accel:
+            vertical = max(-(sim.sink_accel or sim.climb_accel), min(sim.climb_accel, vertical))
+        climb += vertical * DT
         height += climb * DT
         gap = math.hypot(pad_position[0] - position[0], pad_position[1] - position[1])
         if height <= REST:

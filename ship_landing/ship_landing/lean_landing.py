@@ -40,11 +40,13 @@ class LandingParams:
     arrive_speed: float = 0.30       # m/s, relative
     cone_base: float = 0.08          # m, allowed gap at the pad
     cone_slope: float = 0.06         # m of extra allowed gap per metre of height
-    descent_fast: float = 0.6        # m/s, high up
-    descent_slow: float = 0.3        # m/s, close to the pad
-    slow_below: float = 1.5          # m
-    wait_height: float = 0.50        # m, drone centre above the pad (its legs are then about 0.3 m above it)
-    approach_gain: float = 1.0       # 1/s, descent rate per metre still to go to the waiting height
+    descent_fast: float = 0.5        # m/s, high up
+    brake: float = 0.08              # m/s^2, the descent slows towards the waiting height at this rate.
+    #                                  In ALT_HOLD this drone took about 3 s to stop a 0.5 m/s descent
+    #                                  (0.17 m/s^2), so half of that is planned for
+    rate_gain: float = 0.5           # extra throttle per m/s that the measured descent differs from the planned one
+    wait_height: float = 0.60        # m, drone centre above the pad (its legs are then about 0.4 m above it)
+    hold_gain: float = 1.0           # 1/s, climb rate per metre of height error while waiting
     commit_gap: float = 0.05         # m
     commit_speed: float = 0.10       # m/s, relative
     commit_hold: float = 0.4         # s these must hold
@@ -53,6 +55,8 @@ class LandingParams:
     commit_descent: float = 0.5      # m/s
     contact_height: float = 0.24     # m, the drone stands on the pad with its centre 0.20 m above it
     stall_time: float = 0.6          # s without getting lower during COMMIT also counts as contact
+    near_pad: float = 0.35           # m, but only this close to the pad; so does losing the marker there
+    touch_time: float = 0.3          # s at the pad's height outside COMMIT after which the drone is taken to stand on it
     press_time: float = 0.6          # s of pressing down gently on contact before the throttle goes to the bottom
     lost_after: float = 0.8          # s without a detection
     climb_rate: float = 0.4          # m/s while looking for the pad again
@@ -79,6 +83,8 @@ class LeanLander:
         self.lowest_time = None
         self.final_attempts = 0
         self.contact_time = None
+        self.touch_since = None
+        self.touched_early = False
         self.reason = ''
 
     def _enter(self, state, now, reason=''):
@@ -132,7 +138,7 @@ class LeanLander:
             else:
                 return Sticks(0.0, 0.0, self.throttle.stick(p.climb_rate))
         if age > p.lost_after or not track.ready or track.height is None:
-            if self.state == 'COMMIT' and track.height is not None and track.height < p.wait_height:
+            if self.state == 'COMMIT' and track.height is not None and track.height < p.near_pad:
                 # Too close for the camera on the way down: this is the pad arriving, not the pad lost.
                 self._enter('CONTACT', now, 'reached the pad (marker too close to see)')
                 return self.contact_sticks(now)
@@ -143,30 +149,46 @@ class LeanLander:
         gap, speed, height = math.hypot(*track.position), track.speed(), track.height
         climb = 0.0
 
+        if self.state != 'COMMIT':
+            # Standing on the pad without having meant to: accept it and not take off again.
+            if height > p.contact_height:
+                self.touch_since = None
+            elif self.touch_since is None:
+                self.touch_since = now
+            elif now - self.touch_since >= p.touch_time:
+                self.touched_early = True
+                self._enter('CONTACT', now, 'touched the pad before committing')
+                return self.contact_sticks(now)
+
         if self.state == 'APPROACH':
             if self._held(gap < p.arrive_gap and speed < p.arrive_speed, now, 1.0):
                 self._enter('DESCEND', now)
         elif self.state == 'DESCEND':
             if height <= p.wait_height + 0.05:
                 self._enter('WAIT', now)
-            elif gap < p.cone_base + p.cone_slope * height:
-                rate = p.descent_fast if height > p.slow_below else p.descent_slow
-                climb = -min(rate, max(0.08, p.approach_gain * (height - p.wait_height)))
-        elif self.state == 'WAIT':
+            else:
+                # Planned descent speed for this height, zero outside the cone; the throttle
+                # asks for more or less than that by how far the measured descent is off.
+                inside = gap < p.cone_base + p.cone_slope * height
+                planned = min(p.descent_fast, math.sqrt(2.0 * p.brake * (height - p.wait_height))) if inside else 0.0
+                climb = -planned + p.rate_gain * (-planned - track.climb)
+                climb = max(-2.0 * p.descent_fast, min(0.6, climb))
+        if self.state == 'WAIT':
             if height > p.wait_height + 0.25:
                 self._enter('DESCEND', now)
             elif self._held(gap < p.commit_gap + self._slack(now) and speed < p.commit_speed + self._slack(now),
                             now, p.commit_hold):
                 self._enter('COMMIT', now)
             else:
-                climb = max(-0.15, min(0.15, p.approach_gain * (p.wait_height - height)))
+                climb = p.hold_gain * (p.wait_height - height) - p.rate_gain * track.climb
+                climb = max(-0.3, min(0.6, climb))
         if self.state == 'COMMIT':
             climb = -p.commit_descent
             if self.lowest is None or height < self.lowest - 0.01:
                 self.lowest, self.lowest_time = height, now
             if height <= p.contact_height:
                 self._enter('CONTACT', now, 'reached the pad height')
-            elif now - self.lowest_time > p.stall_time:
+            elif height < p.near_pad and now - self.lowest_time > p.stall_time:
                 self._enter('CONTACT', now, 'stopped getting lower')
             if self.state == 'CONTACT':
                 return self.contact_sticks(now)

@@ -44,9 +44,19 @@ class RelativeParams:
     alpha: float = 0.35           # share of a detection's surprise that goes into the position
     beta: float = 0.12            # share that goes into the velocity, per frame time
     gamma: float = 0.012          # share that goes into the pad's acceleration, per frame time squared
+    # A detection's error grows with the distance to the pad, so close to it the tracker can
+    # afford to believe each one more and notice a change in the pad's motion sooner. The three
+    # shares above apply from `far_height` up, the three below from `near_height` down.
+    near_alpha: float = 0.45
+    near_beta: float = 0.20
+    near_gamma: float = 0.025
+    near_height: float = 1.0      # m
+    far_height: float = 4.0       # m
     frame_time: float = 0.1       # s between camera frames
     max_pad_accel: float = 1.0    # m/s^2, the pad's acceleration is kept within this
-    height_smoothing: float = 0.6
+    height_alpha: float = 0.4     # the same two shares for the height and its rate of change
+    height_beta: float = 0.10
+    max_climb: float = 3.0        # m/s
     restart_after: float = 1.5    # s without a detection after which the velocity is no longer trusted
     max_speed: float = 4.0        # m/s, relative speeds beyond this are clipped
 
@@ -64,9 +74,10 @@ class RelativeTrack:
         self.velocity = [0.0, 0.0]    # pad minus drone, m/s
         self.pad_accel = [0.0, 0.0]   # the pad's own acceleration, m/s^2
         self.height = None            # drone centre above the pad's surface, m
+        self.climb = 0.0              # its rate of change, m/s (negative coming down)
         self.last_seen = None
         self.count = 0                # detections since the last restart
-        self.history = deque()        # (time, east, north) of past states, to match late detections
+        self.history = deque()        # (time, east, north, height) of past states, to match late detections
 
     @property
     def ready(self):
@@ -89,23 +100,25 @@ class RelativeTrack:
             self.position[i] += self.velocity[i] * dt + 0.5 * relative_accel * dt * dt
             self.velocity[i] += relative_accel * dt
             self.velocity[i] = max(-self.params.max_speed, min(self.params.max_speed, self.velocity[i]))
+        if self.height is not None:
+            self.height += self.climb * dt
         self.time = now
-        self.history.append((now, self.position[0], self.position[1]))
+        self.history.append((now, self.position[0], self.position[1], self.height))
         while self.history and self.history[0][0] < now - 1.0:
             self.history.popleft()
 
     def _state_at(self, t):
         """The position the tracker held at time t, from its history."""
         if not self.history or t >= self.history[-1][0]:
-            return self.position[0], self.position[1]
+            return self.position[0], self.position[1], self.height
         previous = self.history[0]
         for entry in self.history:
             if entry[0] >= t:
                 span = entry[0] - previous[0]
                 w = (t - previous[0]) / span if span > 0 else 0.0
-                return (previous[1] + w * (entry[1] - previous[1]), previous[2] + w * (entry[2] - previous[2]))
+                return tuple(previous[k] + w * (entry[k] - previous[k]) for k in (1, 2, 3))
             previous = entry
-        return previous[1], previous[2]
+        return previous[1], previous[2], previous[3]
 
     def update(self, stamp, east, north, height):
         """Take in a detection made at time `stamp`: the pad seen (east, north) of the drone."""
@@ -117,22 +130,33 @@ class RelativeTrack:
             self.height = height
             self.last_seen = stamp
             self.count = 1
-            self.history.append((stamp, east, north))
+            self.history.append((stamp, east, north, height))
             return
         # Compare the detection with what the tracker believed at the moment of the
         # image, and apply the difference to the state as it is now.
         believed = self._state_at(stamp)
         surprise = (east - believed[0], north - believed[1])
+        alpha, beta, gamma = self.gains(height)
         for i in (0, 1):
-            self.position[i] += p.alpha * surprise[i]
-            self.velocity[i] += p.beta / p.frame_time * surprise[i]
-            self.pad_accel[i] += p.gamma / (p.frame_time * p.frame_time) * surprise[i]
+            self.position[i] += alpha * surprise[i]
+            self.velocity[i] += beta / p.frame_time * surprise[i]
+            self.pad_accel[i] += gamma / (p.frame_time * p.frame_time) * surprise[i]
             self.pad_accel[i] = max(-p.max_pad_accel, min(p.max_pad_accel, self.pad_accel[i]))
-        self.history = deque((t, e + p.alpha * surprise[0], n + p.alpha * surprise[1]) for t, e, n in self.history)
-        self.height = height if self.height is None else (
-            p.height_smoothing * self.height + (1.0 - p.height_smoothing) * height)
+        rise = height - believed[2]
+        self.height += p.height_alpha * rise
+        self.climb += p.height_beta / p.frame_time * rise
+        self.climb = max(-p.max_climb, min(p.max_climb, self.climb))
+        self.history = deque((t, e + alpha * surprise[0], n + alpha * surprise[1], h + p.height_alpha * rise)
+                             for t, e, n, h in self.history)
         self.last_seen = stamp
         self.count += 1
+
+    def gains(self, height):
+        """(alpha, beta, gamma) for a detection made from this height."""
+        p = self.params
+        w = max(0.0, min(1.0, (p.far_height - height) / (p.far_height - p.near_height)))
+        return (p.alpha + w * (p.near_alpha - p.alpha), p.beta + w * (p.near_beta - p.beta),
+                p.gamma + w * (p.near_gamma - p.gamma))
 
     def speed(self):
         return math.hypot(*self.velocity)

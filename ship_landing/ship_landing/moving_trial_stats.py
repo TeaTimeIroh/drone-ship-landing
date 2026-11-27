@@ -23,6 +23,7 @@ COLUMNS = ['batch', 'seed', 'trial', 'pattern', 'pad_speed', 'outcome', 'reason'
            'track_time', 'final_attempts', 'stop_delay', 'land_mode', 'detections']
 
 TEXT = ('batch', 'pattern', 'outcome', 'reason')
+EARLY_CONTACT = 'reached the pad before committing'    # noted on a landing that touched down unplanned
 CHANGING = 0.08     # m/s: the pad's velocity changed by more than this between commitment and touchdown
 MOVING = 0.05       # m/s: below this the pad has no direction of travel worth naming
 
@@ -91,7 +92,8 @@ def summarise(rows):
         'landed': len(landed),
         'missed': sum(1 for r in rows if r['outcome'] == 'missed'),
         'failed': sum(1 for r in rows if r['outcome'] == 'failed'),
-        'reasons': sorted({r['reason'] for r in rows if r['reason']}),
+        'reasons': sorted({r['reason'] for r in rows if r['reason'] and r['outcome'] != 'landed'}),
+        'early': sum(1 for r in landed if r['reason'] == EARLY_CONTACT),
         'patterns': sorted({f"{r['pattern']} at {r['pad_speed']:g} m/s" for r in rows if r['pad_speed'] is not None}),
         'error': error_stats([r['error'] for r in landed]),
         'over_15cm': sum(1 for r in landed if r['error'] > 0.15),
@@ -151,6 +153,8 @@ def to_markdown(summary):
     if s['stop_delay'] is not None:
         lines.append(f"- Motors stopped {s['stop_delay']:.1f} s after contact on average; LAND mode fallback used "
                      f"{s['land_mode']} times")
+    if s['early']:
+        lines.append(f"- Landings that reached the pad before the final descent was started: {s['early']}")
     lines += ['', '| Batch | Attempts | Landed | Median | Mean | 95th pct | Worst |', '|---|---|---|---|---|---|---|']
     for name, attempts, stats in s['batches']:
         if stats is None:

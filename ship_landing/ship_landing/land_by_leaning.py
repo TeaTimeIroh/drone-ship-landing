@@ -83,6 +83,8 @@ class LandByLeaning(HoldOverPad):
             if lander.state == 'COMMIT':
                 self.pad_velocity_at_commit = self.true_pad_velocity()
             elif lander.state == 'CONTACT':
+                if lander.touched_early:
+                    self.get_logger().warn('The drone reached the pad before it meant to commit')
                 self.contact = {'time': now, 'pad_velocity': self.true_pad_velocity(),
                                 'estimated_offset': tuple(self.track.position)}
         return (sticks.roll, sticks.pitch, sticks.throttle)
@@ -95,7 +97,8 @@ class LandByLeaning(HoldOverPad):
         if track.height is None:
             return 'pad not tracked'
         return (f'pad {track.position[0]:+.2f} m east, {track.position[1]:+.2f} m north, '
-                f'{track.height:.2f} m below the drone, relative speed {track.speed():.2f} m/s')
+                f'{track.height:.2f} m below the drone, relative speed {track.speed():.2f} m/s, '
+                f'climbing {track.climb:+.2f} m/s')
 
     # ---- supervision: called ten times a second -------------------------------------------
 
