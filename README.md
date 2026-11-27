@@ -2,7 +2,7 @@
 
 Simulated autonomous landing of a multirotor on a moving platform aboard a moving ship, without GNSS in the final design. Built to learn the ROS 2, ArduPilot and Gazebo stack end to end, with the simulation kept as close to a real system as a desktop setup allows.
 
-**Status: early.** The drone takes off, finds a landing marker with its downward camera, flies over it and lands on it, all commanded from ROS 2 nodes. Over 30 landings from random start points it touched down a median of 1.5 cm from the pad centre, measured against the simulator's ground truth. That is on a static pad with GPS still on. In a second world the pad moves back and forth at 0.5 m/s, and the drone follows it down and lands on it: 30 of 30 landings were on the pad, with a median error of 2.1 cm. Two of them were 17 and 23 cm off, when the pad began to turn round just as the drone committed. On a circle, 30 of 30 landed with a median error of 3.1 cm. With GPS switched off and a simulated optical flow sensor in its place, both landings are as accurate as with GPS: a median of 1.2 cm on the static pad, 2.3 cm on the pad moving along a line and 3.0 cm on the circle, 30 landings each. The simulated flow sensor is an ideal one, so this shows that the landing does not depend on GPS more than it shows what a real flow sensor would do. A second way of landing therefore steers by lean angle alone, with the camera as its only horizontal reference from a hover above the pad down to it: a median of 1.3 cm on the line (30 landings, none more than 3.0 cm off) and 4.7 cm on the circle (28 landings). Those landings reached the pad without the intended pause above it; the corrected version is being measured. The ship is not implemented. See the roadmap.
+**Status: early.** The drone takes off, finds a landing marker with its downward camera, flies over it and lands on it, all commanded from ROS 2 nodes. Over 30 landings from random start points it touched down a median of 1.5 cm from the pad centre, measured against the simulator's ground truth. That is on a static pad with GPS still on. In a second world the pad moves back and forth at 0.5 m/s, and the drone follows it down and lands on it: 30 of 30 landings were on the pad, with a median error of 2.1 cm. Two of them were 17 and 23 cm off, when the pad began to turn round just as the drone committed. On a circle, 30 of 30 landed with a median error of 3.1 cm. With GPS switched off and a simulated optical flow sensor in its place, both landings are as accurate as with GPS: a median of 1.2 cm on the static pad, 2.3 cm on the pad moving along a line and 3.0 cm on the circle, 30 landings each. The simulated flow sensor is an ideal one, so this shows that the landing does not depend on GPS more than it shows what a real flow sensor would do. A second way of landing therefore steers by lean angle alone, with the camera as its only horizontal reference from a hover above the pad down to it: a median of 1.7 cm on the line (30 landings, worst 12.8 cm) and 4.1 cm on the circle (30 landings, worst 5.9 cm). A first run that looked better on the line turned out to have skipped its pause above the pad; these are the corrected ones. The ship is not implemented. See the roadmap.
 
 ![Drone landing on the marker pad](docs/demo.gif)
 
@@ -200,39 +200,43 @@ Step 5c still leaned on the autopilot's position as a local reference, fed by a 
 
 All three flights show the same steady offset of about 2 cm, which is 0.2 degrees from that height. Its cause is not found.
 
-**Landing.** The same trials as step 5c: same pad paths and speed, and for each seed the same start points and waits. Flying to the start point is still done in GUIDED on the autopilot's position.
+**Landing.** The same trials as step 5c: same pad paths and speed, and for each seed the same start points and waits. Flying to the start point is still done in GUIDED on the autopilot's position. The landing was measured twice, because the first run did not fly the way it was designed to.
 
-| | Circle, 5c | Circle, by leaning | Line, 5c | Line, by leaning |
-|---|---|---|---|---|
-| Landed on the pad | 30 / 30 | 28 / 28 | 30 / 30 | 30 / 30 |
-| Median error | 3.0 cm | 4.7 cm | 2.3 cm | 1.3 cm |
-| Mean error | 3.1 cm | 4.7 cm | 4.4 cm | 1.4 cm |
-| 95th percentile | 4.5 cm | 5.7 cm | 21.0 cm | 2.7 cm |
-| Worst | 5.1 cm | 5.7 cm | 21.8 cm | 3.0 cm |
-| More than 15 cm off | 0 | 0 | 4 | 0 |
-| Average position along the pad's travel | 2.7 cm ahead | 3.4 cm ahead | 3.4 cm ahead | 0.0 cm |
-| Average position across it | | 3.2 cm to the outside | | 0.1 cm |
-| Start point to touchdown | 30.2 s | 23.1 s | 24.6 s | 22.5 s |
+| | Circle, 5c | Circle, first run | Circle, corrected | Line, 5c | Line, first run | Line, corrected |
+|---|---|---|---|---|---|---|
+| Landed on the pad | 30 / 30 | 28 / 28 | 30 / 30 | 30 / 30 | 30 / 30 | 30 / 30 |
+| Median error | 3.0 cm | 4.7 cm | 4.1 cm | 2.3 cm | 1.3 cm | 1.7 cm |
+| Mean error | 3.1 cm | 4.7 cm | 4.2 cm | 4.4 cm | 1.4 cm | 3.1 cm |
+| 95th percentile | 4.5 cm | 5.7 cm | 5.5 cm | 21.0 cm | 2.7 cm | 10.1 cm |
+| Worst | 5.1 cm | 5.7 cm | 5.9 cm | 21.8 cm | 3.0 cm | 12.8 cm |
+| More than 15 cm off | 0 | 0 | 0 | 4 | 0 | 0 |
+| Average position along the pad's travel | 2.7 cm ahead | 3.4 cm ahead | 3.3 cm ahead | 3.4 cm ahead | 0.0 cm | 2.1 cm ahead |
+| Average position across it | | 3.2 cm outside | 2.5 cm outside | | 0.1 cm | 0.1 cm |
+| Start point to touchdown | 30.2 s | 23.1 s | 21.3 s | 24.6 s | 22.5 s | 21.0 s |
+| Reached the pad before committing | | most | 0 | | most | 0 |
 
 ![Touchdown points on the line, landing by leaning](docs/lean_landing/line/touchdowns.png)
 
 ![Touchdown points on the circle, landing by leaning](docs/lean_landing/circle/touchdowns.png)
 
-**These landings were not flown as designed.** The recordings of three of the six batches show that in 34 of 42 arrivals at the waiting height the drone did not stop there: it carried on down at about 0.5 m/s and stood on the pad before any decision to commit. In 11 of those it then lost sight of the marker, took off again from the pad and came back for a second landing. The touchdown positions in the table are true, and every landing ended on the pad, but they are the result of a steady descent straight onto the pad with steering to the end, not of the wait-and-commit described above. Two faults combined:
+**The first run was not flown as designed.** The recordings of three of its six batches show that in 34 of 42 arrivals at the waiting height the drone did not stop there: it carried on down at about 0.5 m/s and stood on the pad before any decision to commit. In 11 of those it then lost sight of the marker, took off again from the pad and came back for a second landing. Its touchdown positions are true, and every landing ended on the pad, but they are the result of a steady descent straight onto the pad with steering to the end. Two faults combined:
 
 - The tracker's height was a smoothed average with no rate of its own, so on the way down it read 0.23 m high (median).
 - In ALT_HOLD this airframe changes its climb rate slowly: stopping a 0.5 m/s descent took about 3 s, where the model had assumed a third of a second. The stick calibration had only measured a short climb.
 
-The summaries did not show it, because a landing that reached the pad early still counted as one final descent; the per-flight recordings did. The fix replaces the height average with a filter that tracks the rate of descent (replayed on the recorded flights, its error on the way down is 1 cm in the median), plans the descent with half the braking the drone showed, treats standing on the pad as a landing whichever stage it is in, and counts such landings in the summary. **The fixed landing has run in the model and not yet in the simulator; the table above is the unfixed one.**
+The summaries did not show it, because a landing that reached the pad early still counted as one final descent; the per-flight recordings did. The correction replaced the height average with a filter that tracks the rate of descent, planned the descent with half the braking the drone had shown, made the tracker believe detections more when close to the pad, treated standing on the pad as a landing whichever stage it is in, and counted such landings in the summary.
+
+**The corrected run did fly as designed**, checked in its recordings and not only in its summaries: all 60 landings went descend, wait, commit, contact. The drone arrived at the waiting height between 0.62 and 0.66 m, never came lower than 0.47 m before committing, waited 0.4 s in the median and 2.6 s at most, and took about 1.0 s from the commit to the pad, arriving at 0.5 m/s. The tracked height ran 7 cm high on the way down, where it had run 23 cm high.
 
 What these numbers do and do not show:
 
-- **The line.** No landing was more than 3.0 cm off, against four over 15 cm in step 5c. A descent that never pauses and steers to the end leaves the pad little time to change its mind, and that is the likely reason. It is not established, and it is not the behaviour the fixed version will have: a drone that waits and then commits is exposed to the pad starting to brake during the commit, as in step 5c.
-- **The circle.** Worse than step 5c by 1.7 cm in the median, and not because of noise: every landing sits in the same place, 3.4 cm ahead of the centre and 3.2 cm to the outside of the turn, with a spread under 1 cm. The model lands in the same place (4.1 cm ahead, 3.8 cm outside), so this is a property of the controller and not of the simulator. Without the pad's estimated acceleration in the lean command the model lands 8 cm outside; with it, the part the estimate is late for remains. Step 4e removed the same kind of offset with a slowly learnt correction that turns with the pad. A plain learnt correction was tried here in the model: it helped the circle and nearly tripled the line's landings over 15 cm, so it was left out.
-- **28 landings, not 30.** In one circle landing the autopilot did not stop the motors within 10 s of contact and its LAND mode was asked to finish. The drone was on the pad and was measured, but a batch ends when that happens. It was one of the landings that reached the pad early; three others like it stopped their motors normally, so the cause is not established.
-- **What "camera only" covers.** The horizontal steering from the switch to ALT_HOLD to the pad. Height is still the autopilot's, takeoff and the flight to the start point still use its flow-based position, and the stick map was measured on this one simulated airframe. The model still lands with a stick map 20% off, more slowly.
+- **The line.** Better than step 5c: nothing over 15 cm, where step 5c had four. Worse than the first run, and for the reason expected: a drone that waits and then commits can meet the pad starting to brake during the commit. The 15 landings where the pad changed speed in that second have a median of 4.2 cm and a worst of 12.8 cm; the other 15 have a median of 0.9 cm. The first run's uninterrupted descent happened to be the better tactic on this path, but it is not one that can stop above a deck that is not ready.
+- **The circle.** Still behind step 5c by about a centimetre, and not because of noise: every landing sits in the same place, 3.3 cm ahead of the centre and 2.5 cm to the outside of the turn, with a spread under 1 cm. The model lands in the same place (3.1 cm ahead, 2.1 cm outside), so this is a property of the controller and not of the simulator. Step 4e removed the same kind of offset with a slowly learnt correction that turns with the pad; that has not been added here.
+- **The model.** After the correction it predicted a median of 1.9 cm and a worst of 14.8 cm on the line and 3.7 cm on the circle; the flights gave 1.7, 12.8 and 4.1 cm. Before it, the model had the vertical response wrong by a factor of ten and predicted a landing that did not happen. It agrees now because it was corrected from these flights, which is weaker evidence than a prediction made beforehand.
+- **One landing in the first run needed LAND mode** to stop the motors, which ended its batch at 8 landings. It was one that had reached the pad early; none did in the corrected run.
+- **What "camera only" covers.** The horizontal steering from the switch to ALT_HOLD to the pad, and the height above the pad used for the descent. The height hold itself is still the autopilot's, takeoff and the flight to the start point still use its flow-based position, and the stick map was measured on this one simulated airframe. The model still lands with a stick map 20% off, more slowly and about twice as far out on the circle.
 
-The runs are in `docs/lean_landing/`, the hold flights in `docs/hold/`, the stick flights in `docs/stick_check/` and the tracker recordings in `docs/relative_check/`.
+The runs are in `docs/lean_landing/` (`line` and `circle` corrected, `line_first` and `circle_first` before), with the per-flight recordings, the hold flights in `docs/hold/`, the stick flights in `docs/stick_check/` and the tracker recordings in `docs/relative_check/`.
 
 ### Tilt correction
 
@@ -640,11 +644,10 @@ These tests check the logic. They say little about real accuracy, because the dr
 - **The drone waits with about 0.2 m under its legs.** Gazebo here models no ground effect or rotor wash off the pad; a real drone would need more room or a different final approach.
 - **The moving-pad landing is measured at one speed.** Faster pads run in the model and have not been measured in the simulator. The drone also trails a turning pad by up to 0.27 m higher up, which suggests it lags its commands more than the 0.4 s the controller allows for; that has not been tuned.
 - **The velocity-command landing relies on the autopilot's position** as a local reference. The landing by leaning (step 5d) does not, from the switch to ALT_HOLD onwards; its takeoff, its flight to the start point and its height still come from the autopilot.
-- **The landing by leaning stands 4.7 cm off centre on the circle**, ahead and to the outside of the turn, the same in every landing. See "Numbers".
-- **The landing by leaning is measured on 30 and 28 landings at one pad speed.** That is too few to say the line's outliers are gone.
+- **The landing by leaning stands 4.1 cm off centre on the circle**, ahead and to the outside of the turn, the same in every landing. See "Numbers".
+- **The landing by leaning is measured on 30 landings per path at one pad speed.** That is too few to say the line's outliers are gone; its worst landing was 12.8 cm off.
 - **The stick map is measured, for one airframe.** A different drone, weight or parameter set needs the calibration flight again.
-- **One landing by leaning in 58 needed LAND mode to stop the motors**, cause not established.
-- **The measured landings by leaning mostly reached the pad without waiting above it**, and the corrected version is not yet measured. See "Numbers".
+- **The landing touches down at 0.5 m/s** and waits only 0.4 s in the median before committing; neither has been tuned.
 - **ALT_HOLD changes its climb rate slowly on this airframe** (about 3 s to stop a 0.5 m/s descent). Whether that is the simulated drone, its parameters or the mode has not been separated.
 - **A steady offset of about 2 cm showed in all three hold flights from 6.4 m**, cause not found.
 - **The moving pad stays level.** It slides east and north only. It cannot heave, roll or pitch.
