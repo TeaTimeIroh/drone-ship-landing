@@ -2,7 +2,7 @@
 
 Simulated autonomous landing of a multirotor on a moving platform aboard a moving ship, without GNSS in the final design. Built to learn the ROS 2, ArduPilot and Gazebo stack end to end, with the simulation kept as close to a real system as a desktop setup allows.
 
-**Status: early.** The drone takes off, finds a landing marker with its downward camera, flies over it and lands on it, all commanded from ROS 2 nodes. Over 30 landings from random start points it touched down a median of 1.5 cm from the pad centre, measured against the simulator's ground truth. That is on a static pad with GPS still on. In a second world the pad moves back and forth at 0.5 m/s, and the drone follows it down and lands on it: 30 of 30 landings were on the pad, with a median error of 2.1 cm. Two of them were 17 and 23 cm off, when the pad began to turn round just as the drone committed. On a circle, 30 of 30 landed with a median error of 3.1 cm. With GPS switched off and a simulated optical flow sensor in its place, both landings are as accurate as with GPS: a median of 1.2 cm on the static pad, 2.3 cm on the pad moving along a line and 3.0 cm on the circle, 30 landings each. The simulated flow sensor is an ideal one, so this shows that the landing does not depend on GPS more than it shows what a real flow sensor would do. The ship is not implemented. See the roadmap.
+**Status: early.** The drone takes off, finds a landing marker with its downward camera, flies over it and lands on it, all commanded from ROS 2 nodes. Over 30 landings from random start points it touched down a median of 1.5 cm from the pad centre, measured against the simulator's ground truth. That is on a static pad with GPS still on. In a second world the pad moves back and forth at 0.5 m/s, and the drone follows it down and lands on it: 30 of 30 landings were on the pad, with a median error of 2.1 cm. Two of them were 17 and 23 cm off, when the pad began to turn round just as the drone committed. On a circle, 30 of 30 landed with a median error of 3.1 cm. With GPS switched off and a simulated optical flow sensor in its place, both landings are as accurate as with GPS: a median of 1.2 cm on the static pad, 2.3 cm on the pad moving along a line and 3.0 cm on the circle, 30 landings each. The simulated flow sensor is an ideal one, so this shows that the landing does not depend on GPS more than it shows what a real flow sensor would do. A second way of landing therefore steers by lean angle alone, with the camera as its only horizontal reference from a hover above the pad down to it: a median of 1.3 cm on the line (30 landings, none more than 3.0 cm off) and 4.7 cm on the circle (28 landings). The ship is not implemented. See the roadmap.
 
 ![Drone landing on the marker pad](docs/demo.gif)
 
@@ -28,6 +28,13 @@ Each stage has a timeout. If the drone is airborne when a stage times out, the n
 4. **Hand over:** below about 1 m the marker no longer fits in the image, so the autopilot's LAND mode finishes straight down.
 
 If the marker is lost for a few seconds the drone climbs to widen its view, and if it stays lost the landing is abandoned. The decision logic is in `landing_control.py`, again without ROS, and is tested in a closed loop against a simple drone and camera model.
+
+`land_by_leaning` (step 5d) lands on the static or the moving pad without asking the autopilot where the drone is or how fast it moves. After the usual takeoff it switches to ALT_HOLD, a mode in which the autopilot only keeps the drone level and its height steady, and steers with three stick positions sent over DDS: lean left or right, lean forward or back, and throttle. The camera closes the loop:
+
+1. **Track:** a filter keeps the pad's position and velocity relative to the drone from the marker detections, and fills the gaps between camera frames with the acceleration the drone's own lean produces (`relative_tracking.py`).
+2. **Steer:** the lean is chosen from the gap, the relative speed and the pad's estimated acceleration, limited to 10 degrees (`lean_control.py`).
+3. **Descend:** the throttle stick brings the drone down while it is inside a cone that narrows towards the pad, waits at 0.5 m until it is within 5 cm and 0.10 m/s, then commits, still steering (`lean_landing.py`).
+4. **Contact:** sticks level, throttle to the bottom, and a disarm request repeated until the autopilot's land detector agrees.
 
 `marker_detector` reads the drone's downward camera, finds the pad's ArUco markers with OpenCV, and publishes the position of the pad centre relative to the camera, in metres. The pad carries two markers with the same centre: a 1 m one for flying height, and a 0.16 m one inside it that still fits in the image when the camera is too close to see the large one whole. It uses the calibration the simulated camera publishes, and it also publishes the camera image with the detection drawn on it. The detection maths lives in `pad_detection.py`, which has no ROS dependency and its own tests.
 
@@ -175,6 +182,51 @@ As on the static pad, the caveat is the sensor. The simulated flow sensor does n
 
 The check flights are in `docs/response/`, the static landing runs in `docs/landing_trials/gps_levelled/` and `docs/landing_trials/flow/`, the moving-pad runs in `docs/moving_pad_trials/circle_flow/` and `docs/moving_pad_trials/line_flow/`.
 
+### Without the autopilot's position: landing by leaning
+
+Step 5c still leaned on the autopilot's position as a local reference, fed by a simulated flow sensor that is better than a real one (it does not see the pad). Step 5d removes that dependence for the landing itself: from the switch to ALT_HOLD down to the pad, the only horizontal reference is the marker. It was built in four parts, each checked in flight before the next.
+
+**Sticks.** A check flight pushed each stick and compared the drone's lean with Gazebo's. Roll stick positive puts the right side down; pitch stick positive puts the nose up. The lean follows the stick as 31.6 degrees × (stick − 0.040), reaches its value in 0.24 to 0.30 s, and a throttle stick of +0.3 gives a 0.33 m/s climb.
+
+**Tracker.** Recorded passively during ordinary moving-pad flights and compared with the truth: the relative velocity was typically 8 cm/s off and 0.05 to 0.10 s late; the relative position was within 0.3 to 3.8 cm below 2 m and 5.9 to 11.8 cm above it, where the range reads about 2% long for a pad away from the image centre.
+
+**Holding over the pad** for 40 s from 6.4 m, one flight each, distance between the drone and the pad centre from 3 s after arriving:
+
+| Pad | Arrived after | Median | 95% within | Worst |
+|---|---|---|---|---|
+| Static | 2.9 s | 2.4 cm | 4.4 cm | 5.6 cm |
+| Circle, 0.5 m/s | 2.6 s | 5.3 cm | 8.6 cm | 12.7 cm |
+| Line, 0.5 m/s | 3.9 s | 4.3 cm | 16.2 cm | 25.7 cm |
+
+All three flights show the same steady offset of about 2 cm, which is 0.2 degrees from that height. Its cause is not found.
+
+**Landing.** The same trials as step 5c: same pad paths and speed, and for each seed the same start points and waits. Flying to the start point is still done in GUIDED on the autopilot's position.
+
+| | Circle, 5c | Circle, by leaning | Line, 5c | Line, by leaning |
+|---|---|---|---|---|
+| Landed on the pad | 30 / 30 | 28 / 28 | 30 / 30 | 30 / 30 |
+| Median error | 3.0 cm | 4.7 cm | 2.3 cm | 1.3 cm |
+| Mean error | 3.1 cm | 4.7 cm | 4.4 cm | 1.4 cm |
+| 95th percentile | 4.5 cm | 5.7 cm | 21.0 cm | 2.7 cm |
+| Worst | 5.1 cm | 5.7 cm | 21.8 cm | 3.0 cm |
+| More than 15 cm off | 0 | 0 | 4 | 0 |
+| Average position along the pad's travel | 2.7 cm ahead | 3.4 cm ahead | 3.4 cm ahead | 0.0 cm |
+| Average position across it | | 3.2 cm to the outside | | 0.1 cm |
+| Start point to touchdown | 30.2 s | 23.1 s | 24.6 s | 22.5 s |
+
+![Touchdown points on the line, landing by leaning](docs/lean_landing/line/touchdowns.png)
+
+![Touchdown points on the circle, landing by leaning](docs/lean_landing/circle/touchdowns.png)
+
+What these numbers do and do not show:
+
+- **The line.** No landing was more than 3.0 cm off, against four over 15 cm in step 5c. This landing keeps steering through the final descent, where the earlier one flew the last part on a prediction, and that is the likely reason. It is not established: only 4 or 5 of the 30 landings met the pad while it was changing speed, and the model of this landing predicted 4 landings in 60 over 15 cm. If that rate were right, 30 landings without one would still happen about one time in eight.
+- **The circle.** Worse than step 5c by 1.7 cm in the median, and not because of noise: every landing sits in the same place, 3.4 cm ahead of the centre and 3.2 cm to the outside of the turn, with a spread under 1 cm. The model lands in the same place (4.1 cm ahead, 3.8 cm outside), so this is a property of the controller and not of the simulator. Without the pad's estimated acceleration in the lean command the model lands 8 cm outside; with it, the part the estimate is late for remains. Step 4e removed the same kind of offset with a slowly learnt correction that turns with the pad. A plain learnt correction was tried here in the model: it helped the circle and nearly tripled the line's landings over 15 cm, so it was left out.
+- **28 landings, not 30.** In one circle landing the autopilot did not stop the motors within 10 s of contact and its LAND mode was asked to finish. The drone was on the pad and was measured, but a batch ends when that happens. Why the land detector held out that once has not been looked at.
+- **What "camera only" covers.** The horizontal steering from the switch to ALT_HOLD to the pad. Height is still the autopilot's, takeoff and the flight to the start point still use its flow-based position, and the stick map was measured on this one simulated airframe. The model still lands with a stick map 20% off, more slowly.
+
+The runs are in `docs/lean_landing/`, the hold flights in `docs/hold/`, the stick flights in `docs/stick_check/` and the tracker recordings in `docs/relative_check/`.
+
 ### Tilt correction
 
 A separate flight checks the tilt correction. The drone hovers 1.5 m west and 1 m south of the static pad at 5 m and swings hard east-west and then north-south, tilting up to 20 degrees. Each detection is converted to a pad position with and without the correction and compared with the pad's true offset, taken from the autopilot's position estimate. The correction is also tried with roll, pitch or both reversed, so that a misread attitude convention would show up as one of those winning.
@@ -287,6 +339,9 @@ What the static-pad landing numbers do not show: the pad was static, there was n
 - **Two markers, one inside the other.** The pad has no room beside the large marker, and the centre is where the drone ends up. The large marker's four middle cells form a 0.33 m square; with an ID whose middle cells are white (only 16 and 45 in this dictionary), a 0.16 m marker fits there with a white margin of its own and the large one still reads. On rendered images the pad was read in every frame from 8 m down to 0.2 m. A 0.2 m inner marker disturbed the large one more from far away and was lost sooner close up.
 - **The learnt correction turns with the pad.** See the circle result under "Numbers". A steady offset relative to a moving target is steady in the target's frame, not in the world's.
 - **Optical flow first, among the ways to fly without GPS.** The landing needs two things from the autopilot: to follow velocity commands, and a local position that is steady over a few seconds. Neither needs an absolute position. Flow with a rangefinder gives velocity directly, is what a small real drone would carry, and needed only a parameter file. The alternatives considered: feeding the marker's position in as external navigation, which works only while the marker is in view and reports a frame that moves with the pad; and visual-inertial odometry from the camera, which is heavy to set up and has little to hold on to over water. The first is kept as a comparison for later.
+- **Lean angles, not velocity commands, for the landing without the autopilot's position.** A velocity command is only as good as the autopilot's own idea of its velocity, and near a deck a real flow sensor would measure that relative to the deck without knowing it. A lean angle needs only the attitude estimate, which does not depend on GPS or flow. The price is that the node has to do what the autopilot's position controller did: estimate relative velocity itself and turn it into lean. The alternatives considered were feeding the marker's position to the autopilot as external navigation, which reports a frame that moves with the pad and stops when the marker is lost, and ArduPilot's built-in precision landing, which is fed over MAVLink and not over DDS.
+- **Sticks over DDS, in ALT_HOLD.** The DDS interface has no attitude command, but it accepts stick positions, and ALT_HOLD turns two of them into lean angles and the third into a climb rate. The map from stick to lean was measured in flight rather than read from the parameters.
+- **The drone's own lean fills the gaps between camera frames.** The camera reports ten times a second, a tenth of a second late. Between frames the tracker moves the estimate on with the acceleration that follows from the drone's attitude, so a lean shows up in the estimate before the camera sees its effect.
 - **Check the replacement against truth before trusting a landing with it.** Two small flights compare the autopilot's own position and speed with Gazebo's. They cost an evening and removed three wrong explanations.
 - **Logic separated from ROS.** Detection (`pad_detection.py`) and the landing decisions (`landing_control.py`) are plain Python. The ROS nodes only move messages in and out, so the logic can be tested without a simulator.
 - **No `cv_bridge`.** Images are converted to NumPy arrays by hand, which avoids a binary dependency that breaks when the system and pip versions of OpenCV and NumPy differ.
@@ -329,7 +384,9 @@ sudo timedatectl set-ntp false
 
 **A node that starts before the autopilot has finished booting can arm and then be unable to take off.** In the first automated run the mode change was accepted early, arming succeeded later, and every takeoff was then refused. The likely cause is the autopilot's own start-up resetting the flight mode after the early change; this was not confirmed. The nodes now wait for the autopilot's pre-arm check, and read back the reported mode and arming state before each step, repeating the sequence if either has changed. Commanding a state and assuming it held was the mistake.
 
-**The simulator stalled twice in long runs and the cause is not found.** Both times a measurement run went silent in mid-flight while Gazebo's window barely responded, although it still showed 70 to 80% of real time. The nodes run on simulation time, so a clock that stops reaching them stops them. The second time memory was checked and ruled out (9 GB free, no swap in use), and the simulator's log ended with routine lines. Both stalls happened with the Gazebo window open, well into a long session; the next hour-long run, without the window, went through. Two stalls and one clean run do not establish the window as the cause. A stalled batch can be repeated on its own with the same seed, which is what was done.
+**The simulator stalled twice in long runs and the cause is not found.** Both times a measurement run went silent in mid-flight while Gazebo's window barely responded, although it still showed 70 to 80% of real time. The nodes run on simulation time, so a clock that stops reaching them stops them. The second time memory was checked and ruled out (9 GB free, no swap in use), and the simulator's log ended with routine lines. Both stalls happened with the Gazebo window open, well into a long session; the next three hour-long runs, without the window, went through. Two stalls and three clean runs suggest the window and do not establish it. A stalled batch can be repeated on its own with the same seed, which is what was done.
+
+**Sticks sent to a topic nobody reads look exactly like centred sticks, until the mode changes.** The first stick flight published to `/joy` instead of `/ap/v1/joy`, because the base class never stored the prefix it had found. In GUIDED nothing showed. On the switch to ALT_HOLD the autopilot read the simulator's own throttle stick, which rests at the bottom, and the drone sank 4.5 m at 2.5 m/s before the node took it back. The nodes now hand over only after the autopilot's `rc` topic has shown their stick values in force for a second, and return to GUIDED at once if the height moves without being asked to.
 
 **Starting a second simulator stops the clock for every node.** With one Gazebo already running, a second one logs `Found additional publishers on /clock, using namespaced clock topic only` and publishes its clock under another name. No simulation time reaches ROS, so nodes using `use_sim_time` wait forever, while camera images keep arriving and make everything look alive. Stop the old simulator first; `pgrep -a -f "gz sim"` shows whether one is still running.
 
@@ -496,6 +553,20 @@ GUI=false bash ship_landing/tools/run_moving_trials.sh         # without the Gaz
 
 Results go to `results/moving_<date_time>/`: one CSV per batch, `summary.md` and `touchdowns.png`, drawn relative to the pad's direction of travel.
 
+The same script measures the landing by leaning, which writes its results in the same columns:
+
+```bash
+LANDER=lean NAV=flow GUI=false bash ship_landing/tools/run_moving_trials.sh 3 10
+```
+
+A single landing by leaning, with the moving pad world running without GPS:
+
+```bash
+ros2 run ship_landing land_by_leaning --ros-args -p use_sim_time:=true -p output:=results/lean_landing
+```
+
+For the static pad add `-p pad_x:=3.0 -p pad_y:=2.0`; these say where the pad starts and are used only for the truth columns of the recording. `hold_over_pad` takes the same arguments and holds over the pad for 40 s without landing.
+
 ### From VS Code
 
 With the repository folder open in VS Code (WSL), the same commands are available as tasks: Terminal > Run Task, or Ctrl+Shift+P and "Tasks: Run Task". They are defined in `.vscode/tasks.json` and set up their own environment from `env.sh`. The start tasks refuse to run while a simulator is already up, because a second one leaves every node without a clock.
@@ -520,17 +591,23 @@ With the repository folder open in VS Code (WSL), the same commands are availabl
 | Measure: tilt check | Swinging flight near the static pad, then the tilt correction summary |
 | Check: navigation against Gazebo | Flies a square and a hover, compares the autopilot's position with the truth |
 | Check: response to velocity commands | Records how the true speed follows a command, then summarises it |
+| Fly: hold over static / moving pad by leaning | Hold over the pad for 40 s on lean angles, camera only, then summarise |
+| Fly: land on static / moving pad by leaning | Land that way and report the true touchdown position |
+| Measure: landing by leaning quick check / full run | The moving-pad trials flown by leaning, on optical flow, starting their own simulator |
+| Check: steering by stick positions | Pushes each stick in ALT_HOLD and reports which way the drone leans |
+| Check: calibrate the sticks | Measures lean against stick position |
+| Check: camera-only pad tracking | Records the relative tracker against the truth while another node flies |
 | Check: where is the drone | True position from Gazebo |
 | Build package | `colcon build` for this package (Ctrl+Shift+B) |
 | Run tests | The pytest suite |
 
 ### Tests
 
-The detection code is tested against synthetic camera views with a known marker position, the landing logic against a closed-loop model with camera delay, noise, dropped frames and a camera that tilts with the drone, and the pad's path generator against its travel, speed and acceleration limits, the tilt correction against a model of a drone that leans as it accelerates, and the moving-pad landing in a closed-loop model with a pad on a line or a circle, a lagging drone, late and missing camera frames and a camera that loses the marker when it is too close or too far to the side. No simulator is needed:
+The detection code is tested against synthetic camera views with a known marker position, the landing logic against a closed-loop model with camera delay, noise, dropped frames and a camera that tilts with the drone, and the pad's path generator against its travel, speed and acceleration limits, the tilt correction against a model of a drone that leans as it accelerates, and the moving-pad landing in a closed-loop model with a pad on a line or a circle, a lagging drone, late and missing camera frames and a camera that loses the marker when it is too close or too far to the side. The relative tracker, the lean controller and the landing by leaning have a second model of their own, with a lean that lags the stick, a delayed stick, and stick maps that can be made wrong on purpose. No simulator is needed:
 
 ```bash
 cd ~/ardu_ws/src/drone-ship-landing/ship_landing
-python3 -m pytest test/test_pad_detection.py test/test_landing_control.py test/test_ground_truth.py test/test_trial_stats.py test/test_pad_motion.py test/test_levelling.py test/test_pad_tracking.py test/test_moving_trial_stats.py
+python3 -m pytest test/test_pad_detection.py test/test_landing_control.py test/test_ground_truth.py test/test_trial_stats.py test/test_pad_motion.py test/test_levelling.py test/test_pad_tracking.py test/test_moving_trial_stats.py test/test_relative_tracking.py test/test_lean_control.py test/test_lean_landing.py
 ```
 
 These tests check the logic. They say little about real accuracy, because the drone model in them is far simpler than the simulator.
@@ -553,7 +630,12 @@ These tests check the logic. They say little about real accuracy, because the dr
 - **A circle at 1.0 m/s never lands** in the model: the pad's acceleration is beyond what the filter tracks, and the drone waits. Not tried in the simulator.
 - **The drone waits with about 0.2 m under its legs.** Gazebo here models no ground effect or rotor wash off the pad; a real drone would need more room or a different final approach.
 - **The moving-pad landing is measured at one speed.** Faster pads run in the model and have not been measured in the simulator. The drone also trails a turning pad by up to 0.27 m higher up, which suggests it lags its commands more than the 0.4 s the controller allows for; that has not been tuned.
-- **The moving-pad landing relies on the autopilot's position** as a local reference, so far with GPS. See "Design decisions".
+- **The velocity-command landing relies on the autopilot's position** as a local reference. The landing by leaning (step 5d) does not, from the switch to ALT_HOLD onwards; its takeoff, its flight to the start point and its height still come from the autopilot.
+- **The landing by leaning stands 4.7 cm off centre on the circle**, ahead and to the outside of the turn, the same in every landing. See "Numbers".
+- **The landing by leaning is measured on 30 and 28 landings at one pad speed.** That is too few to say the line's outliers are gone.
+- **The stick map is measured, for one airframe.** A different drone, weight or parameter set needs the calibration flight again.
+- **One landing by leaning in 58 needed LAND mode to stop the motors**, cause not examined.
+- **A steady offset of about 2 cm showed in all three hold flights from 6.4 m**, cause not found.
 - **The moving pad stays level.** It slides east and north only. It cannot heave, roll or pitch.
 - **The large marker is unreadable below about 0.6 m and the small one below about 0.15 m.** With the drone standing on the pad the small marker was still read, 0.09 m from the lens, but the rendered-image tests put reliable reading at 0.15 m.
 - **Long runs with the Gazebo window open have stalled twice**, cause unknown. See "Lessons learned".
@@ -575,7 +657,7 @@ These tests check the logic. They say little about real accuracy, because the dr
 | 5a | GPS switched off with nothing in its place: what the autopilot does | Done |
 | 5b | Optical flow in place of GPS: checked against truth, static-pad landing measured | Done |
 | 5c | Moving-pad landing without GPS, measured against step 4e | Done |
-| 5d | Marker-based external navigation as a comparison, if 5c leaves a reason to | Planned |
+| 5d | Landing steered by lean angle with the camera as the only horizontal reference: stick check, tracker, hold, landing measured against 5c | Done |
 | 6 | Ship with wave motion (heave, roll, pitch) and touchdown timing | Planned |
 | 7 | Realism pass: sensor noise, latency, wind, batch runs with landing-error statistics | Planned |
 
@@ -614,6 +696,10 @@ drone-ship-landing/
     ├── test/test_pad_tracking.py     tests for following and landing on the moving pad
     ├── test/moving_pad_sim.py        the closed-loop model those tests fly in
     ├── test/test_moving_trial_stats.py  tests for the moving pad trial statistics
+    ├── test/test_relative_tracking.py   tests for the camera-only tracker
+    ├── test/test_lean_control.py     tests for the lean controller
+    ├── test/test_lean_landing.py     tests for the landing by leaning
+    ├── test/lean_hold_sim.py         the closed-loop model those three fly in
     └── ship_landing/
         ├── flight_base.py            shared: connect, arm, take off, land, timeouts
         ├── takeoff_demo.py           takeoff, cruise and landing node
@@ -634,6 +720,18 @@ drone-ship-landing/
         ├── pad_tracking.py           pad estimate and moving-pad landing decisions, no ROS
         ├── moving_pad_trials.py      repeated moving-pad landings with ground-truth logging
         ├── moving_trial_stats.py     statistics for those trials, no ROS
+        ├── stick_base.py             shared: stick positions over DDS, and the check that they are in force
+        ├── stick_check.py            flight that pushes each stick and calibrates the stick map
+        ├── stick_analysis.py         analysis of that recording, no ROS
+        ├── relative_tracking.py      pad position and velocity relative to the drone, camera only, no ROS
+        ├── relative_check.py         records that tracker against the truth
+        ├── relative_analysis.py      analysis of that recording, no ROS
+        ├── lean_control.py           lean angles and stick positions to stay over the pad, no ROS
+        ├── hold_over_pad.py          holds over the pad by leaning, ROS node
+        ├── hold_analysis.py          analysis of a hold flight, no ROS
+        ├── lean_landing.py           the way down by throttle stick, no ROS
+        ├── land_by_leaning.py        landing by leaning, ROS node
+        ├── lean_trials.py            repeated landings by leaning with ground-truth logging
         ├── pad_mover.py              drives the moving pad, ROS node
         ├── pad_motion.py             path of the moving pad, no ROS
         └── ap_names.py               finds the autopilot's topic prefix

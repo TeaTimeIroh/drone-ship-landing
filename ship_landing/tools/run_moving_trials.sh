@@ -8,6 +8,7 @@
 #   PAD_SPEED=1.0 bash ship_landing/tools/run_moving_trials.sh   a faster pad
 #   GUI=false bash ship_landing/tools/run_moving_trials.sh       without the Gazebo window (lighter)
 #   NAV=flow bash ship_landing/tools/run_moving_trials.sh        GPS off, optical flow instead
+#   LANDER=lean NAV=flow bash ship_landing/tools/run_moving_trials.sh   land by leaning, camera only (step 5d)
 #
 # Results go to results/moving_<date_time>/: one CSV per batch, the simulator logs,
 # summary.md and touchdowns.png. Stop with Ctrl+C; finished trials are kept.
@@ -19,6 +20,7 @@ PATTERN="${PATTERN:-line}"
 PAD_SPEED="${PAD_SPEED:-0.5}"
 GUI="${GUI:-true}"
 NAV="${NAV:-gps}"
+LANDER="${LANDER:-velocity}"      # velocity: GUIDED velocity commands; lean: ALT_HOLD sticks, camera only
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$REPO/env.sh"
@@ -31,8 +33,8 @@ stop_simulator() {
 trap 'echo; echo "Interrupted, stopping the simulator"; stop_simulator; exit 130' INT TERM
 
 echo "Results folder: $OUT"
-echo "Pad: $PATTERN at $PAD_SPEED m/s, navigation: $NAV"
-echo "pattern=$PATTERN pad_speed=$PAD_SPEED nav=$NAV" > "$OUT/run_info.txt"
+echo "Pad: $PATTERN at $PAD_SPEED m/s, navigation: $NAV, landing by: $LANDER"
+echo "pattern=$PATTERN pad_speed=$PAD_SPEED nav=$NAV lander=$LANDER" > "$OUT/run_info.txt"
 stop_simulator      # make sure nothing is left over from an earlier session
 
 for batch in $(seq 1 "$BATCHES"); do
@@ -42,9 +44,16 @@ for batch in $(seq 1 "$BATCHES"); do
         pattern:="$PATTERN" pad_speed:="$PAD_SPEED" gui:="$GUI" nav:="$NAV") > "$OUT/sim_$batch.log" 2>&1 &
 
     # The trials node waits for the autopilot itself, so it can start straight away.
-    ros2 run ship_landing moving_pad_trials --ros-args -p use_sim_time:=true \
-        -p trials:="$TRIALS" -p seed:="$batch" -p batch:="batch$batch" \
-        -p pattern:="$PATTERN" -p pad_speed:="$PAD_SPEED" -p output:="$OUT/batch_$batch.csv"
+    if [ "$LANDER" = "lean" ]; then
+        ros2 run ship_landing lean_trials --ros-args -p use_sim_time:=true \
+            -p trials:="$TRIALS" -p seed:="$batch" -p batch:="batch$batch" \
+            -p pattern:="$PATTERN" -p pad_speed:="$PAD_SPEED" -p results:="$OUT/batch_$batch.csv" \
+            -p output:="$OUT" -p csv_name:="flight_$batch.csv"
+    else
+        ros2 run ship_landing moving_pad_trials --ros-args -p use_sim_time:=true \
+            -p trials:="$TRIALS" -p seed:="$batch" -p batch:="batch$batch" \
+            -p pattern:="$PATTERN" -p pad_speed:="$PAD_SPEED" -p output:="$OUT/batch_$batch.csv"
+    fi
     echo "=== Batch $batch finished with exit code $? ==="
     stop_simulator
 done

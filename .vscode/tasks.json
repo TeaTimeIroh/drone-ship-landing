@@ -48,6 +48,30 @@
             "command": "source '${workspaceFolder}/env.sh' && ros2 run ship_landing land_on_moving_pad --ros-args -p use_sim_time:=true"
         },
         {
+            "label": "Fly: hold over static pad by leaning (camera only, no landing)",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && cd '${workspaceFolder}' && ros2 run ship_landing hold_over_pad --ros-args -p use_sim_time:=true -p pad_x:=3.0 -p pad_y:=2.0 -p output:=results/hold_static && python3 ship_landing/tools/analyze_hold.py results/hold_static",
+            "problemMatcher": []
+        },
+        {
+            "label": "Fly: hold over moving pad by leaning (camera only, no landing)",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && cd '${workspaceFolder}' && ros2 run ship_landing hold_over_pad --ros-args -p use_sim_time:=true -p output:=results/hold_${input:padPattern} && python3 ship_landing/tools/analyze_hold.py results/hold_${input:padPattern}",
+            "problemMatcher": []
+        },
+        {
+            "label": "Fly: land on static pad by leaning (camera only)",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && cd '${workspaceFolder}' && ros2 run ship_landing land_by_leaning --ros-args -p use_sim_time:=true -p pad_x:=3.0 -p pad_y:=2.0 -p output:=results/lean_landing_static",
+            "problemMatcher": []
+        },
+        {
+            "label": "Fly: land on moving pad by leaning (camera only)",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && cd '${workspaceFolder}' && ros2 run ship_landing land_by_leaning --ros-args -p use_sim_time:=true -p output:=results/lean_landing_${input:padPattern}",
+            "problemMatcher": []
+        },
+        {
             "label": "Fly: takeoff demo",
             "type": "shell",
             "command": "source '${workspaceFolder}/env.sh' && ros2 run ship_landing takeoff_demo --ros-args -p use_sim_time:=true"
@@ -88,6 +112,16 @@
             "command": "PATTERN=${input:padPattern} NAV=${input:navSource} bash '${workspaceFolder}/ship_landing/tools/run_moving_trials.sh' 3 10"
         },
         {
+            "label": "Measure: landing by leaning quick check (1 batch of 2 landings, starts its own simulator)",
+            "type": "shell",
+            "command": "LANDER=lean NAV=flow PATTERN=${input:padPattern} bash '${workspaceFolder}/ship_landing/tools/run_moving_trials.sh' 1 2"
+        },
+        {
+            "label": "Measure: landing by leaning full run (3 batches of 10 landings, about an hour)",
+            "type": "shell",
+            "command": "LANDER=lean NAV=flow PATTERN=${input:padPattern} GUI=false bash '${workspaceFolder}/ship_landing/tools/run_moving_trials.sh' 3 10"
+        },
+        {
             "label": "Measure: tilt check (static pad world must be running)",
             "type": "shell",
             "command": "source '${workspaceFolder}/env.sh' && OUT='${workspaceFolder}/results/tilt_check_'$(date +%Y%m%d_%H%M%S) && ros2 run ship_landing tilt_check --ros-args -p use_sim_time:=true -p output:=\"$OUT\"; python3 '${workspaceFolder}/ship_landing/tools/analyze_tilt.py' \"$OUT\""
@@ -108,6 +142,18 @@
             "label": "Check: steering by stick positions (ALT_HOLD, records a short flight)",
             "type": "shell",
             "command": "source '${workspaceFolder}/env.sh' && cd '${workspaceFolder}' && ros2 run ship_landing stick_check --ros-args -p use_sim_time:=true -p output:=results/stick_check && python3 ship_landing/tools/analyze_sticks.py results/stick_check",
+            "problemMatcher": []
+        },
+        {
+            "label": "Check: calibrate the sticks (ALT_HOLD, several push sizes)",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && cd '${workspaceFolder}' && ros2 run ship_landing stick_check --ros-args -p use_sim_time:=true -p plan:=calibrate -p output:=results/stick_calibration && python3 ship_landing/tools/analyze_sticks.py results/stick_calibration",
+            "problemMatcher": []
+        },
+        {
+            "label": "Check: camera-only pad tracking (start, fly, then Ctrl+C)",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && cd '${workspaceFolder}' && (ros2 run ship_landing relative_check --ros-args -p use_sim_time:=true -p output:=results/relative_check; python3 ship_landing/tools/analyze_relative.py results/relative_check)",
             "problemMatcher": []
         },
         {

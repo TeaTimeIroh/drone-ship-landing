@@ -21,15 +21,13 @@ import csv
 import math
 from pathlib import Path
 
-from ardupilot_msgs.msg import Rc
 from ardupilot_msgs.srv import ModeSwitch
 from nav_msgs.msg import Odometry
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Joy
 
 from ship_landing.flight_base import GUIDED, FlightNode, run
+from ship_landing.stick_base import ALT_HOLD, StickNode
 
-ALT_HOLD = 2
 RECORD_PERIOD = 0.05     # s between rows
 # (label, seconds, roll stick, pitch stick, throttle stick), each stick from -1 to 1.
 # A centred throttle stick means "hold this height" in ALT_HOLD.
@@ -46,8 +44,20 @@ PLAN = [
 ]
 
 
-class StickCheck(FlightNode):
-    STATE_TIMEOUT = dict(FlightNode.STATE_TIMEOUT, STICKS=120.0)
+def calibration_plan():
+    """Pushes of several sizes on the roll stick, and two on the pitch stick to compare."""
+    plan = [('centred', 4.0, 0.0, 0.0, 0.0)]
+    for stick in (0.1, 0.2, 0.3, 0.4):
+        plan += [(f'roll {stick:+.2f}', 1.5, stick, 0.0, 0.0), (f'roll {-stick:+.2f}', 1.5, -stick, 0.0, 0.0),
+                 (f'centred after roll {stick:.2f}', 2.0, 0.0, 0.0, 0.0)]
+    for stick in (0.2, 0.4):
+        plan += [(f'pitch {stick:+.2f}', 1.5, 0.0, stick, 0.0), (f'pitch {-stick:+.2f}', 1.5, 0.0, -stick, 0.0),
+                 (f'centred after pitch {stick:.2f}', 2.0, 0.0, 0.0, 0.0)]
+    return plan
+
+
+class StickCheck(StickNode):
+    STATE_TIMEOUT = dict(FlightNode.STATE_TIMEOUT, STICKS=180.0)
     AIRBORNE_STATES = ('CLIMB', 'STICKS')
     FIRST_MISSION_STATE = 'STICKS'
 
@@ -55,17 +65,15 @@ class StickCheck(FlightNode):
         super().__init__('stick_check')
         self.output = Path(str(self.declare_parameter('output', 'results/stick_check').value))
         truth_topic = str(self.declare_parameter('truth_topic', '/odometry').value)
+        # 'check': one push per stick. 'calibrate': several sizes, to map stick position to lean.
+        self.plan = calibration_plan() if str(self.declare_parameter('plan', 'check').value) == 'calibrate' else PLAN
         self.phase = 'settle'        # settle, to_alt_hold, plan, to_guided, hold
         self.phase_started = None
         self.index = 0
         self.label = 'before'
-        self.sticks = (0.0, 0.0, 0.0)
-        self.joy_pub = None
         self.rows = 0
         self.last_row = None
         self.start_alt = None
-        self.rc = None               # latest stick channels as the autopilot sees them
-        self.rc_sub = None
         self.sticks_ok_since = None
         self.abort_reason = None
 
@@ -87,34 +95,6 @@ class StickCheck(FlightNode):
         self.log.writerow([f'{t:.3f}', self.label, self.mode, *self.sticks]
                           + [f'{v:.4f}' for v in (p.x, p.y, p.z, q.x, q.y, q.z, q.w)])
         self.rows += 1
-
-    def on_rc(self, msg):
-        self.rc = (list(msg.channels), list(msg.active_overrides))
-
-    def sticks_in_force(self):
-        """True if the autopilot reports our four sticks as overridden, throttle near the middle."""
-        if self.rc is None:
-            return False
-        channels, overridden = self.rc
-        return (len(channels) >= 4 and len(overridden) >= 4 and all(overridden[:4])
-                and 1400 <= channels[2] <= 1600)
-
-    def describe_rc(self):
-        if self.rc is None:
-            return 'no message on the rc topic'
-        channels, overridden = self.rc
-        return f'channels 1 to 4 read {channels[:4]}, overridden: {overridden[:4]}'
-
-    def send_sticks(self, roll=0.0, pitch=0.0, throttle=0.0):
-        """Stick positions from -1 to 1 on channels 1 to 4: roll, pitch, throttle, yaw."""
-        if self.joy_pub is None:
-            self.joy_pub = self.create_publisher(Joy, f'{self.prefix}/joy', 10)
-            self.rc_sub = self.create_subscription(Rc, f'{self.prefix}/rc', self.on_rc, qos_profile_sensor_data)
-        self.sticks = (roll, pitch, throttle)
-        msg = Joy()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.axes = [float(roll), float(pitch), float(throttle), 0.0]
-        self.joy_pub.publish(msg)
 
     def next_phase(self, phase, seconds):
         self.get_logger().info(f'sticks: {self.phase} -> {phase}')
@@ -163,18 +143,18 @@ class StickCheck(FlightNode):
                 if elapsed > 10.0:
                     self.fail('The autopilot did not switch to ALT_HOLD', now)
         elif self.phase == 'plan':
-            label, duration, roll, pitch, throttle = PLAN[self.index]
+            label, duration, roll, pitch, throttle = self.plan[self.index]
             if self.label != label:
                 self.label = label
-                self.get_logger().info(f'sticks: {label} (roll {roll:+.1f}, pitch {pitch:+.1f}, '
-                                       f'throttle {throttle:+.1f}) for {duration:.0f} s')
+                self.get_logger().info(f'sticks: {label} (roll {roll:+.2f}, pitch {pitch:+.2f}, '
+                                       f'throttle {throttle:+.2f}) for {duration:.1f} s')
             self.send_sticks(roll, pitch, throttle)
             if throttle != 0.0:
                 self.start_alt = self.alt        # a change of height that was asked for
             if elapsed >= duration:
                 self.index += 1
                 self.phase_started = seconds
-                if self.index >= len(PLAN):
+                if self.index >= len(self.plan):
                     self.label = 'after'
                     self.next_phase('to_guided', seconds)
         elif self.phase == 'to_guided':
