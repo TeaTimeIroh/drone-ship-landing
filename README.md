@@ -86,7 +86,7 @@ There are two runs. The first showed a constant offset, the second tested an exp
 | Batch means | 2.2, 2.3, 2.3 cm | 1.5, 1.0, 1.4 cm |
 | Start point to touchdown (simulation time) | mean 17.2 s, longest 20.7 s | mean 17.4 s, longest 21.5 s |
 
-![Touchdown points relative to the pad centre, run 2](docs/landing_trials/corrected/touchdowns.png)
+![Touchdown points relative to the pad centre, run 2](docs/static_pad/corrected/touchdowns.png)
 
 **Run 1.** Most of the error was a constant offset, not scatter: the landings clustered about 2 cm south-west of the centre, with roughly 1 cm of spread around that point. The suspected cause was that the camera does not sit at the drone's centre in the Iris model, so centring the camera over the marker leaves the body to one side.
 
@@ -139,7 +139,7 @@ In everything but height the two are the same. The height is not an estimation e
 | Average miss | 0.3 cm west, 0.0 cm south | 0.5 cm west, 0.3 cm north | 0.2 cm west, 0.6 cm north |
 | Start point to touchdown | mean 17.4 s | mean 16.7 s | mean 19.0 s |
 
-![Touchdown points without GPS](docs/landing_trials/flow/touchdowns.png)
+![Touchdown points without GPS](docs/static_pad/flow/touchdowns.png)
 
 Without GPS the landing is as accurate as with it. The flow landings take about 2 s longer because they start 1.2 m higher.
 
@@ -172,7 +172,7 @@ A simplified model with a gentle drone did not reproduce this at any height. One
 | Average position along the pad's travel | 3.0 cm ahead | 2.7 cm ahead | 2.0 cm ahead | 3.4 cm ahead |
 | Start point to touchdown | 28.2 s | 30.2 s | 21.8 s | 24.6 s |
 
-![Touchdown points on the line without GPS](docs/moving_pad_trials/line_flow/touchdowns.png)
+![Touchdown points on the line without GPS](docs/moving_pad_velocity/line_flow/touchdowns.png)
 
 On the circle the two are the same to within a millimetre or two, including the 3 cm steady offset ahead of the centre, which therefore belongs to the landing logic and not to the navigation source. On the line, the landings where the pad held its velocity are the same too. The flow run has four landings over 15 cm against two with GPS. With 30 landings each that is not a difference: these are the landings where the pad began to brake as the drone committed, and how many of 30 start points fall into that moment is chance. Taken together it happened in 6 of 60 landings, which is more often than the 1 in 20 the model predicted in step 4e.
 
@@ -180,7 +180,7 @@ The flow landings take 2 to 3 s longer because the drone starts 1.2 m higher. Ba
 
 As on the static pad, the caveat is the sensor. The simulated flow sensor does not see the pad moving underneath. A real one, looking down at a pad that fills more and more of its view, would report speed relative to the pad during the last metres, and the autopilot would take the pad's motion for its own. That case is not covered by these numbers.
 
-The check flights are in `docs/response/`, the static landing runs in `docs/landing_trials/gps_levelled/` and `docs/landing_trials/flow/`, the moving-pad runs in `docs/moving_pad_trials/circle_flow/` and `docs/moving_pad_trials/line_flow/`.
+The check flights are in `docs/checks/response_gps/` and `docs/checks/response_flow/`, the static landing runs in `docs/static_pad/gps_levelled/` and `docs/static_pad/flow/`, the moving-pad runs in `docs/moving_pad_velocity/circle_flow/` and `docs/moving_pad_velocity/line_flow/`.
 
 ### Without the autopilot's position: landing by leaning
 
@@ -215,9 +215,9 @@ All three flights show the same steady offset of about 2 cm, which is 0.2 degree
 | Start point to touchdown | 30.2 s | 23.1 s | 21.3 s | 24.6 s | 22.5 s | 21.0 s |
 | Reached the pad before committing | | most | 0 | | most | 0 |
 
-![Touchdown points on the line, landing by leaning](docs/lean_landing/line/touchdowns.png)
+![Touchdown points on the line, landing by leaning](docs/moving_pad_leaning/line/touchdowns.png)
 
-![Touchdown points on the circle, landing by leaning](docs/lean_landing/circle/touchdowns.png)
+![Touchdown points on the circle, landing by leaning](docs/moving_pad_leaning/circle/touchdowns.png)
 
 **The first run was not flown as designed.** The recordings of three of its six batches show that in 34 of 42 arrivals at the waiting height the drone did not stop there: it carried on down at about 0.5 m/s and stood on the pad before any decision to commit. In 11 of those it then lost sight of the marker, took off again from the pad and came back for a second landing. Its touchdown positions are true, and every landing ended on the pad, but they are the result of a steady descent straight onto the pad with steering to the end. Two faults combined:
 
@@ -236,7 +236,7 @@ What these numbers do and do not show:
 - **One landing in the first run needed LAND mode** to stop the motors, which ended its batch at 8 landings. It was one that had reached the pad early; none did in the corrected run.
 - **What "camera only" covers.** The horizontal steering from the switch to ALT_HOLD to the pad, and the height above the pad used for the descent. The height hold itself is still the autopilot's, takeoff and the flight to the start point still use its flow-based position, and the stick map was measured on this one simulated airframe. The model still lands with a stick map 20% off, more slowly and about twice as far out on the circle.
 
-The runs are in `docs/lean_landing/` (`line` and `circle` corrected, `line_first` and `circle_first` before), with the per-flight recordings, the hold flights in `docs/hold/`, the stick flights in `docs/stick_check/` and the tracker recordings in `docs/relative_check/`.
+The runs are in `docs/moving_pad_leaning/` (`line` and `circle` corrected, `line_first` and `circle_first` before), with the per-flight recordings, the hold flights in `docs/checks/hold_*/`, the stick flights in `docs/checks/stick_check/` and the tracker recordings in `docs/checks/relative_check/`.
 
 ### On the boat, flat sea
 
@@ -252,14 +252,14 @@ The `ship` world has a 13.7 m workboat with the pad in the middle of its aft dec
 | Average position across it | 0.9 cm to port |
 | Landing start to touchdown | 13.6 s |
 
-![Touchdown points on the boat at 2 m/s](docs/ship_landing/straight_2ms/touchdowns.png)
+![Touchdown points on the boat at 2 m/s](docs/boat/straight_2ms/touchdowns.png)
 
 - **Speed alone costs nothing measurable.** A boat on a steady course is, for the camera, a pad standing still: these numbers match the static pad (1.2 cm), not the moving one. The drone leans a little into the air it flies through and the tracker absorbs that as a constant.
 - **What this does not test.** The boat neither turns, nor changes speed during a landing, nor moves in the waves. The line and circle runs above are the evidence for a pad that changes its velocity; nothing yet is evidence for a deck that heaves or tilts.
 - **The take-off is from a boat at rest.** A GUIDED take-off holds a position over the ground, so from a deck already moving at 2 m/s the drone would be pulled backwards toward the stern wall as it lifted. Taking off by sticks would avoid that and has not been built.
 - **The first run of this measurement failed, and not in the landing.** Every landing was on the pad, but each take-off ended lower than the one before (6.72, 6.02, 5.56, 5.04 m above the pad in one batch), and the fourth or fifth never reached its height. The drops followed the distance the boat had sailed. SITL has its own ground, separate from Gazebo's: it looks up real terrain at the drone's coordinates, and its simulated rangefinder measures against that. ArduCopter takes the height of a GUIDED take-off from a healthy rangefinder. So as the boat sailed east, the simulated ground fell away under the sea and each take-off climbed less. With SITL's terrain lookup switched off for this world (`config/ship.parm`), all 30 trials completed. The explanation rests on that before-and-after and on reading the ArduPilot source, not on a direct measurement of the simulated ground.
 
-The run is in `docs/ship_landing/straight_2ms/`.
+The run is in `docs/boat/straight_2ms/`.
 
 ### Tilt correction
 
@@ -273,7 +273,7 @@ A separate flight checks the tilt correction. The drone hovers 1.5 m west and 1 
 | Corrected, pitch reversed | 0.96 m | 1.47 m | 0.11 m |
 | Corrected, both reversed | 1.38 m | 2.10 m | 0.16 m |
 
-![Error in the pad's position with and without the tilt correction](docs/tilt_check/tilt_check.png)
+![Error in the pad's position with and without the tilt correction](docs/checks/tilt_check/tilt_check.png)
 
 The correction as written wins clearly and every reversed variant is worse than no correction, so the attitude is being read correctly. No time offset between image and pose timestamps improved the result, and the heading implied by the camera (89.3°) agrees with the autopilot's (89.9°).
 
@@ -299,7 +299,7 @@ There are three runs. The first exposed a fault in the landing logic, the second
 | Spread across the pad's travel | 1.0 cm | 0.8 cm | 1.0 cm |
 | Start point to touchdown (simulation time) | mean 21.1 s | mean 23.8 s | mean 19.3 s, longest 25.3 s |
 
-![Touchdown points on the moving pad, run 3, relative to the pad's direction of travel](docs/moving_pad_trials/run3/touchdowns.png)
+![Touchdown points on the moving pad, run 3, relative to the pad's direction of travel](docs/moving_pad_velocity/run3/touchdowns.png)
 
 In the plot, right is ahead of the pad centre in the direction the pad was travelling at touchdown. The two groups are split by what the pad really did between the drone's commitment and touchdown, not by batch.
 
@@ -326,7 +326,7 @@ In the plot, right is ahead of the pad centre in the direction the pad was trave
 | Average position across it | 0.1 cm right | 2.3 cm left (the outside of the turn) |
 | Spread along / across | 8.1 cm / 1.0 cm | 1.2 cm / 1.1 cm |
 
-![Touchdown points on the pad moving in a circle](docs/moving_pad_trials/circle/touchdowns.png)
+![Touchdown points on the pad moving in a circle](docs/moving_pad_velocity/circle/touchdowns.png)
 
 There are no large misses, because a pad on a circle never changes pace suddenly. Instead every landing is off by nearly the same amount in the same direction: the touchdown points sit in a cluster about 1 cm wide, 10 cm from the centre. I first put this down to the blind last stretch, flown on an extrapolation that does not follow the curve. That was wrong, as the next section shows.
 
@@ -345,9 +345,9 @@ Step 4e added the small marker and changed the landing logic. The paths, speed a
 | Average position along the pad's travel | 4.1 cm ahead | 2.0 cm ahead | 9.7 cm ahead | 3.0 cm ahead |
 | Model's prediction for "after": median / worst | | 2.0 / 22.2 cm | | 2.4 / 4.5 cm |
 
-![Touchdown points on the circle after step 4e](docs/moving_pad_trials/circle_4e/touchdowns.png)
+![Touchdown points on the circle after step 4e](docs/moving_pad_velocity/circle_4e/touchdowns.png)
 
-![Touchdown points on the line after step 4e](docs/moving_pad_trials/line_4e/touchdowns.png)
+![Touchdown points on the line after step 4e](docs/moving_pad_velocity/line_4e/touchdowns.png)
 
 **The circle offset was a fault in the controller, not in what the drone could see.** Before changing anything, the model was run with the pad visible all the way down: the offset stayed at 9 cm. The drone was riding a fixed distance ahead of the pad throughout the descent. The controller has a slow correction for steady offsets of that kind, but it kept the correction in a fixed frame, and over a pad on a circle the offset turns with the pad, so the correction always pointed where the pad had been heading a few seconds earlier. Turning the stored correction at the pad's own turn rate brought the offset from 9.7 to 3.0 cm. The 3 cm that remain are still systematic (spread 1.1 cm) and are not explained.
 
@@ -355,9 +355,9 @@ Step 4e added the small marker and changed the landing logic. The paths, speed a
 
 The model predicted both results before the runs, including that the line misses would remain.
 
-What none of these numbers show: two paths at one speed, the pad level, no wind, a noiseless camera, the drone facing north throughout, and GPS in use for the drone's own position. Faster pads have not been measured. The simplified model in `test/moving_pad_sim.py` predicted the blind-descent misses but not the turn-around fault of run 1, because its drone followed turn-arounds more closely than the simulated ArduCopter does. All runs are in `docs/moving_pad_trials/`.
+What none of these numbers show: two paths at one speed, the pad level, no wind, a noiseless camera, the drone facing north throughout, and GPS in use for the drone's own position. Faster pads have not been measured. The simplified model in `test/moving_pad_sim.py` predicted the blind-descent misses but not the turn-around fault of run 1, because its drone followed turn-arounds more closely than the simulated ArduCopter does. All runs are in `docs/moving_pad_velocity/`.
 
-What the static-pad landing numbers do not show: the pad was static, there was no wind, the camera was noiseless and undistorted, the drone always faced north, and the last metre was flown by the autopilot using GPS. They describe this simulation, not a real aircraft. The raw data, summaries and plots of both runs are in `docs/landing_trials/baseline/` and `docs/landing_trials/corrected/`, and the tilt check recording is in `docs/tilt_check/`.
+What the static-pad landing numbers do not show: the pad was static, there was no wind, the camera was noiseless and undistorted, the drone always faced north, and the last metre was flown by the autopilot using GPS. They describe this simulation, not a real aircraft. The raw data, summaries and plots of both runs are in `docs/static_pad/baseline/` and `docs/static_pad/corrected/`, and the tilt check recording is in `docs/checks/tilt_check/`.
 
 ## Design decisions
 
@@ -575,7 +575,7 @@ ros2 run ship_landing tilt_check --ros-args -p use_sim_time:=true -p output:=res
 python3 ship_landing/tools/analyze_tilt.py results/tilt_check
 ```
 
-Results go to `results/<date_time>/`: one CSV per batch, `summary.md` and `touchdowns.png`. The two runs reported under "Numbers" are kept in `docs/landing_trials/`. The start points depend only on the batch number, so two runs can be compared landing by landing. To re-run only the analysis: `python3 ship_landing/tools/analyze_trials.py results/<run>/batch_*.csv --out results/<run>`.
+Results go to `results/<date_time>/`: one CSV per batch, `summary.md` and `touchdowns.png`. The two runs reported under "Numbers" are kept in `docs/static_pad/`. The start points depend only on the batch number, so two runs can be compared landing by landing. To re-run only the analysis: `python3 ship_landing/tools/analyze_trials.py results/<run>/batch_*.csv --out results/<run>`.
 
 ### Measuring accuracy on the moving pad
 
@@ -715,11 +715,21 @@ These tests check the logic. They say little about real accuracy, because the dr
 
 ## Repository layout
 
+The name `ship_landing` appears twice on purpose. The outer folder is the ROS 2 package, and a ROS 2 Python package keeps its code in an inner folder of the same name. That is the layout `colcon` expects, so it stays.
+
 ```
 drone-ship-landing/
 ├── README.md
+├── LICENSE
 ├── env.sh                            shell setup: ROS, workspace, Gazebo paths
 ├── .vscode/tasks.json                VS Code tasks for the common commands
+├── docs/                             the measured runs this README reports
+│   ├── demo.gif
+│   ├── static_pad/                   landings on the static pad (steps 3 and 5)
+│   ├── moving_pad_velocity/          landings on the moving pad by velocity commands (steps 4 and 5c)
+│   ├── moving_pad_leaning/           landings on the moving pad by leaning (step 5d)
+│   ├── boat/                         landings on the boat (step 6)
+│   └── checks/                       single check flights: tilt, navigation response, sticks, tracker, hold
 └── ship_landing/                     ROS 2 Python package
     ├── package.xml
     ├── setup.py
@@ -804,4 +814,4 @@ The project was built with Claude (Anthropic) as a coding assistant. Claude prop
 
 ## License
 
-MIT, see [LICENSE](ship_landing/LICENSE), except the world files in `ship_landing/worlds/`, which are derived from a GPL-3.0 file as noted above. The hull mesh and textures in `ship_landing/models/ship/` are CC BY 4.0, as noted above.
+MIT, see [LICENSE](LICENSE), except the world files in `ship_landing/worlds/`, which are derived from a GPL-3.0 file as noted above. The hull mesh and textures in `ship_landing/models/ship/` are CC BY 4.0, as noted above.
