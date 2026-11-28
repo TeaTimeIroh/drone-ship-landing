@@ -51,6 +51,8 @@ class HoldOverPad(StickNode):
         self.csv_name = str(self.declare_parameter('csv_name', 'hold.csv').value)
         self.pad_origin = (float(self.declare_parameter('pad_x', 4.0).value),
                            float(self.declare_parameter('pad_y', 3.0).value))
+        # Height of the pad's surface in the Gazebo world: 0.12 m in the pad worlds, 0 on the boat.
+        self.pad_z = float(self.declare_parameter('pad_z', PAD_TOP).value)
         defaults = HoldParams()
         self.hold = PadHold(HoldParams(
             closing_gain=float(self.declare_parameter('closing_gain', defaults.closing_gain).value),
@@ -121,7 +123,7 @@ class HoldOverPad(StickNode):
         self.log.writerow([f'{t:.3f}', self.phase] + [f'{v:.4f}' for v in (
             track.position[0], track.position[1], track.velocity[0], track.velocity[1],
             track.pad_accel[0], track.pad_accel[1], min(track.age(t), 99.0),
-            pad[0] - p.x, pad[1] - p.y, p.z - PAD_TOP, self.sticks[0], self.sticks[1],
+            pad[0] - p.x, pad[1] - p.y, p.z - self.pad_z, self.sticks[0], self.sticks[1],
             c.lean_forward if c else 0.0, c.lean_left if c else 0.0,
             track.height if track.height is not None else 0.0, self.sticks[2])] + [self.landing_label()])
         self.rows += 1

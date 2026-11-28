@@ -102,3 +102,26 @@ def test_correction_is_limited():
 def test_unknown_pattern_is_rejected():
     with pytest.raises(ValueError):
         PadMotion(MotionParams(pattern='zigzag'))
+
+
+def test_straight_runs_up_to_speed_and_keeps_going():
+    motion = PadMotion(MotionParams(pattern='straight', speed=2.0, accel=0.25))
+    for _ in range(int(8.0 / 0.05)):
+        east, north = motion.step(0.05)
+    assert abs(east - 2.0) < 0.02 and north == 0.0
+    start = motion.reference[0]
+    for _ in range(int(100.0 / 0.05)):
+        motion.step(0.05)
+    assert abs(motion.reference[0] - start - 200.0) < 0.5      # no turning round, however far
+
+
+def test_straight_stops_and_starts_with_the_speed():
+    motion = PadMotion(MotionParams(pattern='straight', speed=0.0))
+    assert motion.step(0.05) == (0.0, 0.0)
+    motion.params.speed = 2.0
+    for _ in range(int(10.0 / 0.05)):
+        motion.step(0.05)
+    motion.params.speed = 0.0
+    for _ in range(int(10.0 / 0.05)):
+        east, _ = motion.step(0.05)
+    assert east == 0.0

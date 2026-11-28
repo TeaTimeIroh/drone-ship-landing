@@ -2,7 +2,7 @@
 
 Simulated autonomous landing of a multirotor on a moving platform aboard a moving ship, without GNSS in the final design. Built to learn the ROS 2, ArduPilot and Gazebo stack end to end, with the simulation kept as close to a real system as a desktop setup allows.
 
-**Status: early.** The drone takes off, finds a landing marker with its downward camera, flies over it and lands on it, all commanded from ROS 2 nodes. Over 30 landings from random start points it touched down a median of 1.5 cm from the pad centre, measured against the simulator's ground truth. That is on a static pad with GPS still on. In a second world the pad moves back and forth at 0.5 m/s, and the drone follows it down and lands on it: 30 of 30 landings were on the pad, with a median error of 2.1 cm. Two of them were 17 and 23 cm off, when the pad began to turn round just as the drone committed. On a circle, 30 of 30 landed with a median error of 3.1 cm. With GPS switched off and a simulated optical flow sensor in its place, both landings are as accurate as with GPS: a median of 1.2 cm on the static pad, 2.3 cm on the pad moving along a line and 3.0 cm on the circle, 30 landings each. The simulated flow sensor is an ideal one, so this shows that the landing does not depend on GPS more than it shows what a real flow sensor would do. A second way of landing therefore steers by lean angle alone, with the camera as its only horizontal reference from a hover above the pad down to it: a median of 1.7 cm on the line (30 landings, worst 12.8 cm) and 4.1 cm on the circle (30 landings, worst 5.9 cm). A first run that looked better on the line turned out to have skipped its pause above the pad; these are the corrected ones. The ship is not implemented. See the roadmap.
+**Status: early.** The drone takes off, finds a landing marker with its downward camera, flies over it and lands on it, all commanded from ROS 2 nodes. Over 30 landings from random start points it touched down a median of 1.5 cm from the pad centre, measured against the simulator's ground truth. That is on a static pad with GPS still on. In a second world the pad moves back and forth at 0.5 m/s, and the drone follows it down and lands on it: 30 of 30 landings were on the pad, with a median error of 2.1 cm. Two of them were 17 and 23 cm off, when the pad began to turn round just as the drone committed. On a circle, 30 of 30 landed with a median error of 3.1 cm. With GPS switched off and a simulated optical flow sensor in its place, both landings are as accurate as with GPS: a median of 1.2 cm on the static pad, 2.3 cm on the pad moving along a line and 3.0 cm on the circle, 30 landings each. The simulated flow sensor is an ideal one, so this shows that the landing does not depend on GPS more than it shows what a real flow sensor would do. A second way of landing therefore steers by lean angle alone, with the camera as its only horizontal reference from a hover above the pad down to it: a median of 1.7 cm on the line (30 landings, worst 12.8 cm) and 4.1 cm on the circle (30 landings, worst 5.9 cm). A first run that looked better on the line turned out to have skipped its pause above the pad; these are the corrected ones. A boat now carries the pad on its aft deck: the drone takes off from it, follows it up to 2 m/s and lands on it, 30 of 30 landings with a median error of 1.2 cm and a worst of 2.7 cm. The sea is still flat; waves are next. See the roadmap.
 
 ![Drone landing on the marker pad](docs/demo.gif)
 
@@ -238,6 +238,29 @@ What these numbers do and do not show:
 
 The runs are in `docs/lean_landing/` (`line` and `circle` corrected, `line_first` and `circle_first` before), with the per-flight recordings, the hold flights in `docs/hold/`, the stick flights in `docs/stick_check/` and the tracker recordings in `docs/relative_check/`.
 
+### On the boat, flat sea
+
+The `ship` world has a 13.7 m workboat with the pad in the middle of its aft deck, 3.3 m behind the cabin and the masts and 3.3 m ahead of the stern, with walls 0.65 m high on three sides. The boat does not float: it hangs on joints, like the moving pad, and its motion is commanded. In each trial the drone takes off from the pad with the boat at rest, holds over it by leaning, the boat gets under way to 2 m/s at 0.25 m/s², the drone follows for a random 0 to 12 s more and then lands with the step 5d landing, unchanged.
+
+| 30 landings, boat at 2 m/s | |
+|---|---|
+| Landed on the pad | 30 / 30 |
+| Median error | 1.2 cm |
+| 95th percentile | 2.0 cm |
+| Worst | 2.7 cm |
+| Average position along the boat's travel | 0.5 cm behind the centre |
+| Average position across it | 0.9 cm to port |
+| Landing start to touchdown | 13.6 s |
+
+![Touchdown points on the boat at 2 m/s](docs/ship_landing/straight_2ms/touchdowns.png)
+
+- **Speed alone costs nothing measurable.** A boat on a steady course is, for the camera, a pad standing still: these numbers match the static pad (1.2 cm), not the moving one. The drone leans a little into the air it flies through and the tracker absorbs that as a constant.
+- **What this does not test.** The boat neither turns, nor changes speed during a landing, nor moves in the waves. The line and circle runs above are the evidence for a pad that changes its velocity; nothing yet is evidence for a deck that heaves or tilts.
+- **The take-off is from a boat at rest.** A GUIDED take-off holds a position over the ground, so from a deck already moving at 2 m/s the drone would be pulled backwards toward the stern wall as it lifted. Taking off by sticks would avoid that and has not been built.
+- **The first run of this measurement failed, and not in the landing.** Every landing was on the pad, but each take-off ended lower than the one before (6.72, 6.02, 5.56, 5.04 m above the pad in one batch), and the fourth or fifth never reached its height. The drops followed the distance the boat had sailed. SITL has its own ground, separate from Gazebo's: it looks up real terrain at the drone's coordinates, and its simulated rangefinder measures against that. ArduCopter takes the height of a GUIDED take-off from a healthy rangefinder. So as the boat sailed east, the simulated ground fell away under the sea and each take-off climbed less. With SITL's terrain lookup switched off for this world (`config/ship.parm`), all 30 trials completed. The explanation rests on that before-and-after and on reading the ArduPilot source, not on a direct measurement of the simulated ground.
+
+The run is in `docs/ship_landing/straight_2ms/`.
+
 ### Tilt correction
 
 A separate flight checks the tilt correction. The drone hovers 1.5 m west and 1 m south of the static pad at 5 m and swings hard east-west and then north-south, tilting up to 20 degrees. Each detection is converted to a pad position with and without the correction and compared with the pad's true offset, taken from the autopilot's position estimate. The correction is also tried with roll, pitch or both reversed, so that a misread attitude convention would show up as one of those winning.
@@ -400,6 +423,8 @@ sudo timedatectl set-ntp false
 **Sticks sent to a topic nobody reads look exactly like centred sticks, until the mode changes.** The first stick flight published to `/joy` instead of `/ap/v1/joy`, because the base class never stored the prefix it had found. In GUIDED nothing showed. On the switch to ALT_HOLD the autopilot read the simulator's own throttle stick, which rests at the bottom, and the drone sank 4.5 m at 2.5 m/s before the node took it back. The nodes now hand over only after the autopilot's `rc` topic has shown their stick values in force for a second, and return to GUIDED at once if the height moves without being asked to.
 
 **A summary can be right about where the drone landed and silent about how.** Thirty landings by leaning came back with a median error of 1.3 cm and one final descent each. One log line, `WAIT -> CONTACT`, did not fit: the drone was on the pad before it had decided to land. The per-flight recordings showed that most landings had gone that way. The counters had been written for the path the code was meant to take. Recording the true height next to the tracked one, and the throttle stick next to both, is what made the fault visible in minutes once someone looked.
+
+**The autopilot's simulator and the world's simulator each have their own ground.** Gazebo knows the boat, the sea and the pad. SITL knows none of them: its rangefinder and optical flow sensor measure against a ground of its own, which by default is the real terrain around its start location. On a runway the two agree well enough to go unnoticed. On a boat that sails 300 m they do not, and the first sign was a take-off that got lower every time. Anything the autopilot does with those two sensors near the deck is, in this setup, not tested against the deck.
 
 **Starting a second simulator stops the clock for every node.** With one Gazebo already running, a second one logs `Found additional publishers on /clock, using namespaced clock topic only` and publishes its clock under another name. No simulation time reaches ROS, so nodes using `use_sim_time` wait forever, while camera images keep arriving and make everything look alive. Stop the old simulator first; `pgrep -a -f "gz sim"` shows whether one is still running.
 
@@ -566,6 +591,14 @@ GUI=false bash ship_landing/tools/run_moving_trials.sh         # without the Gaz
 
 Results go to `results/moving_<date_time>/`: one CSV per batch, `summary.md` and `touchdowns.png`, drawn relative to the pad's direction of travel.
 
+On the boat:
+
+```bash
+WORLD=ship SHIP_SPEED=2.0 GUI=false bash ship_landing/tools/run_moving_trials.sh 3 10
+```
+
+or by hand, `ros2 launch ship_landing pad_sim.launch.py world:=ship nav:=flow` and then `land_by_leaning` with `-p pad_x:=0.0 -p pad_y:=0.0 -p pad_z:=0.0 -p ship_speed:=2.0`.
+
 The same script measures the landing by leaning, which writes its results in the same columns:
 
 ```bash
@@ -627,6 +660,9 @@ These tests check the logic. They say little about real accuracy, because the dr
 
 ## Known limitations and roadmap
 
+- **The sea is flat and the boat's motion is imposed.** It hangs on joints and is driven at a commanded speed; no water pushes it. Waves, when they come, will be prescribed motion too.
+- **The simulated rangefinder and flow sensor do not see the boat or the water.** They measure against SITL's own flat ground. The autopilot's height hold near the deck is therefore not tested by the deck.
+- **Take-off is from a boat at rest**, see "Numbers".
 - **Runs slower than real time.** On WSL2 with an RTX 3060 the simulation runs at roughly 0.5 to 0.8 times real time. ArduPilot and Gazebo advance in lockstep, so flight behaviour is unaffected, but it makes every test slower.
 - **Without GPS, both landings are measured only with the ideal simulated sensor** described in the next point.
 - **The simulated optical flow sensor is ideal.** SITL computes it from the drone's true velocity over flat, still ground. It has no surface-dependent noise and does not see the pad, the deck or water. Over a moving pad a real sensor would report speed relative to the pad.
@@ -672,7 +708,9 @@ These tests check the logic. They say little about real accuracy, because the dr
 | 5b | Optical flow in place of GPS: checked against truth, static-pad landing measured | Done |
 | 5c | Moving-pad landing without GPS, measured against step 4e | Done |
 | 5d | Landing steered by lean angle with the camera as the only horizontal reference: stick check, tracker, hold, landing measured against 5c | Done |
-| 6 | Ship with wave motion (heave, roll, pitch) and touchdown timing | Planned |
+| 6a | A boat that carries the pad: take off from it, follow it at 2 m/s on a flat sea and land on it, measured | Done |
+| 6b | Deck motion: heave, roll and pitch, recorded against the tracker before landing on it | Planned |
+| 6c | The drone's vertical response, and landing on a heaving and tilting deck with touchdown timing | Planned |
 | 7 | Realism pass: sensor noise, latency, wind, batch runs with landing-error statistics | Planned |
 
 ## Repository layout
@@ -689,10 +727,13 @@ drone-ship-landing/
     ├── launch/pad_sim.launch.py      the above plus the detector, and the pad motion if it moves
     ├── worlds/landing_pad.sdf        runway world with the static landing pad
     ├── worlds/moving_pad.sdf         runway world with the moving landing pad
+    ├── worlds/ship.sdf               open water with the boat that carries the pad
     ├── models/aruco_pad/             the static pad model and its marker texture
     ├── models/moving_pad/            the pad on two sliding joints
+    ├── models/ship/                  the boat with the pad on its aft deck (hull mesh: "Vessel E", CC BY 4.0)
     ├── config/camera_down.parm       autopilot parameters: camera straight down
     ├── config/optical_flow.parm      autopilot parameters: GPS off, optical flow on
+    ├── config/ship.parm              autopilot parameters for the ship world: SITL's own ground made flat
     ├── tools/make_marker.py          regenerates the marker texture
     ├── tools/run_trials.sh           batches of landings with simulator restarts
     ├── tools/run_moving_trials.sh    the same on the moving pad
@@ -755,10 +796,12 @@ drone-ship-landing/
 
 This project stands on [ArduPilot](https://ardupilot.org) (ArduCopter SITL, the DDS interface and MAVProxy), [Gazebo](https://gazebosim.org) Harmonic, [ROS 2](https://docs.ros.org) Humble, the ArduPilot Gazebo integration packages [`ardupilot_gazebo`](https://github.com/ArduPilot/ardupilot_gazebo) and [`ardupilot_gz`](https://github.com/ArduPilot/ardupilot_gz), the Micro XRCE-DDS agent, and Mission Planner, and on [OpenCV](https://opencv.org) for marker detection. The Iris quadcopter model and the runway come from those ArduPilot packages. `worlds/landing_pad.sdf` is derived from `runway.sdf` in `ardupilot_gz`, which is licensed GPL-3.0.
 
+The boat in the `ship` world uses the hull mesh and textures of ["Vessel E" by OpenRobotics](https://app.gazebosim.org/OpenRobotics/fuel/models/Vessel%20E) from Gazebo Fuel, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The mesh and textures are unchanged; the model file around them is this project's (see `ship_landing/models/ship/ATTRIBUTION.md`).
+
 This is a learning project: my first time working with ROS 2, ArduPilot and Gazebo. I used it to learn how the pieces fit together and how to test a flight system step by step, not to write or study every line myself. I can explain what each part does, why it is built that way and what the measurements show; I have not gone through the code line by line.
 
 The project was built with Claude (Anthropic) as a coding assistant. Claude proposed the staged roadmap, wrote the nodes, the launch files, the pad models, the tests and the first draft of this README, and diagnosed setup errors from the logs and screenshots I supplied, and analysed the landing trials. Several of its first diagnoses and designs were wrong and were corrected by checking against what the simulator actually did. I chose the project and its goals, installed and built the whole stack, ran every command and every flight in the simulator, and decided what to keep. The problems under "Lessons learned" were found by running each step and reading its output, and the fixes listed are the ones that worked on my machine.
 
 ## License
 
-MIT, see [LICENSE](ship_landing/LICENSE), except `ship_landing/worlds/landing_pad.sdf`, which is derived from a GPL-3.0 file as noted above.
+MIT, see [LICENSE](ship_landing/LICENSE), except the world files in `ship_landing/worlds/`, which are derived from a GPL-3.0 file as noted above. The hull mesh and textures in `ship_landing/models/ship/` are CC BY 4.0, as noted above.

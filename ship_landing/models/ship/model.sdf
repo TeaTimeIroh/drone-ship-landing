@@ -1,0 +1,181 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <!-- A workboat with the landing pad on its aft deck.
+
+       The boat does not float. It hangs from the world on two sliding joints, like the
+       pad in moving_pad, and each joint is driven at a commanded speed, so its motion
+       is whatever the ship_mover commands and nothing the drone does can push it.
+       The joints have the same names as in moving_pad, so the same nodes drive and
+       read both:
+
+         /model/ship/joint/slide_east/cmd_vel      speed ahead, m/s (the bow points east)
+         /model/ship/joint/slide_north/cmd_vel     speed to port, m/s
+         /world/ship/model/ship/joint_state        true joint positions
+
+       Heights. The model's origin is at the centre of the pad's top surface, so that a
+       world which places the model at 0 0 0 has the pad's surface at z = 0 and a drone
+       spawned at the world origin stands on the pad. In the model's frame:
+
+         pad surface        z =  0.00
+         aft deck floor     z = -0.10   (the pad is 0.10 m thick)
+         waterline          z = -0.52
+         top of the masts   z = +5.56
+
+       The hull mesh and its textures are "Vessel E" by OpenRobotics, CC BY 4.0, see
+       ATTRIBUTION.md. The mesh is only looked at. What the drone can touch are the
+       boxes below, measured from the mesh: the deck floor, the walls round it, the
+       cabin and the masts. -->
+  <model name="ship">
+
+    <link name="carriage">
+      <inertial>
+        <mass>1.0</mass>
+        <inertia>
+          <ixx>0.1</ixx><iyy>0.1</iyy><izz>0.1</izz>
+          <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+        </inertia>
+      </inertial>
+    </link>
+
+    <link name="hull">
+      <inertial>
+        <mass>200.0</mass>
+        <inertia>
+          <ixx>500</ixx><iyy>3000</iyy><izz>3000</izz>
+          <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz>
+        </inertia>
+      </inertial>
+
+      <!-- The mesh has its bow along +Y, its deck floor at z = 0.42 and the middle of the
+           aft deck 3.3 m behind its origin. Turned and shifted, the bow points along +X
+           and the pad's place on the deck is at the link's origin. -->
+      <visual name="hull">
+        <pose>3.3 0 -0.52 0 0 -1.5708</pose>
+        <geometry>
+          <mesh>
+            <uri>meshes/Boat05.dae</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>1.0 1.0 1.0</diffuse>
+          <specular>1.0 1.0 1.0</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/Boat05_Albedo.jpg</albedo_map>
+              <normal_map>materials/textures/Boat05_Normal.png</normal_map>
+              <roughness_map>materials/textures/Boat05_Roughness.jpg</roughness_map>
+              <metalness_map>materials/textures/Boat05_Metalness.png</metalness_map>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+
+      <!-- Aft deck floor: 6.8 m long, 4.56 m wide, top at z = -0.10. -->
+      <collision name="deck">
+        <pose>0.1 0 -0.20 0 0 0</pose>
+        <geometry><box><size>6.8 4.56 0.20</size></box></geometry>
+      </collision>
+      <!-- Walls round the deck, 0.65 m above its floor. -->
+      <collision name="wall_port">
+        <pose>0.1 2.37 0.225 0 0 0</pose>
+        <geometry><box><size>6.8 0.18 0.65</size></box></geometry>
+      </collision>
+      <collision name="wall_starboard">
+        <pose>0.1 -2.37 0.225 0 0 0</pose>
+        <geometry><box><size>6.8 0.18 0.65</size></box></geometry>
+      </collision>
+      <collision name="wall_stern">
+        <pose>-3.39 0 0.225 0 0 0</pose>
+        <geometry><box><size>0.18 4.92 0.65</size></box></geometry>
+      </collision>
+      <!-- Cabin and foredeck, as one block, and the masts above it. -->
+      <collision name="cabin">
+        <pose>6.9 0 0.95 0 0 0</pose>
+        <geometry><box><size>6.6 4.0 2.9</size></box></geometry>
+      </collision>
+      <collision name="masts">
+        <pose>5.1 0 3.95 0 0 0</pose>
+        <geometry><box><size>3.2 1.2 3.2</size></box></geometry>
+      </collision>
+
+      <!-- The landing pad, fixed to the deck: 1.25 m square, 0.10 m thick. -->
+      <collision name="pad">
+        <pose>0 0 -0.05 0 0 0</pose>
+        <geometry><box><size>1.25 1.25 0.10</size></box></geometry>
+      </collision>
+      <visual name="pad_base">
+        <pose>0 0 -0.05 0 0 0</pose>
+        <geometry><box><size>1.25 1.25 0.10</size></box></geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <specular>0 0 0 1</specular>
+        </material>
+      </visual>
+      <visual name="marker">
+        <pose>0 0 0.001 0 0 0</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry>
+          <plane>
+            <normal>0 0 1</normal>
+            <size>1.25 1.25</size>
+          </plane>
+        </geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/aruco_pad.png</albedo_map>
+              <metalness>0.0</metalness>
+              <roughness>1.0</roughness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+    </link>
+
+    <!-- The effort limits are needed: without them Gazebo's physics engine does not
+         enforce the position limits on a joint driven by speed commands. The boat may
+         go 20 km ahead, which is more than any run needs. -->
+    <joint name="slide_east" type="prismatic">
+      <parent>world</parent>
+      <child>carriage</child>
+      <axis>
+        <xyz expressed_in="__model__">1 0 0</xyz>
+        <limit>
+          <lower>-100</lower>
+          <upper>20000</upper>
+          <effort>20000</effort>
+        </limit>
+      </axis>
+    </joint>
+
+    <joint name="slide_north" type="prismatic">
+      <parent>carriage</parent>
+      <child>hull</child>
+      <axis>
+        <xyz expressed_in="__model__">0 1 0</xyz>
+        <limit>
+          <lower>-100</lower>
+          <upper>100</upper>
+          <effort>20000</effort>
+        </limit>
+      </axis>
+    </joint>
+
+    <plugin filename="gz-sim-joint-controller-system"
+      name="gz::sim::systems::JointController">
+      <joint_name>slide_east</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-joint-controller-system"
+      name="gz::sim::systems::JointController">
+      <joint_name>slide_north</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-joint-state-publisher-system"
+      name="gz::sim::systems::JointStatePublisher">
+    </plugin>
+
+  </model>
+</sdf>

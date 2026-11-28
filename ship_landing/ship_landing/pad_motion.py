@@ -8,6 +8,8 @@ east and north speeds to command. Positions are in metres from the pad's start p
             the line: 0 is east-west, 90 is north-south.
     circle  a circle of `radius` metres that starts at the start point heading east and
             curves to the south, at a steady `speed`.
+    straight  straight ahead along `heading_deg` without end, at a steady `speed`: a ship
+            on its course. Changing the speed speeds it up or slows it down at `accel`.
 
 With speed 0 the pad stays where it is. The speed may be changed while running; the
 pattern and its size may not.
@@ -15,7 +17,7 @@ pattern and its size may not.
 import math
 from dataclasses import dataclass
 
-PATTERNS = ('line', 'circle')
+PATTERNS = ('line', 'circle', 'straight')
 
 
 @dataclass
@@ -73,6 +75,8 @@ class PadMotion:
         speed = abs(p.speed)
         if p.pattern == 'line':
             self._step_line(dt, speed)
+        elif p.pattern == 'straight':
+            self._step_straight(dt, speed)
         else:
             self._step_circle(dt, speed)
         return self.reference_velocity[0] + pull_east, self.reference_velocity[1] + pull_north
@@ -87,6 +91,15 @@ class PadMotion:
         self.rate = _towards(self.rate, self.direction * speed, p.accel * dt)
         self.along += self.rate * dt
 
+        heading = math.radians(p.heading_deg)
+        ux, uy = math.cos(heading), math.sin(heading)
+        self.reference = (self.along * ux, self.along * uy)
+        self.reference_velocity = (self.rate * ux, self.rate * uy)
+
+    def _step_straight(self, dt, speed):
+        p = self.params
+        self.rate = _towards(self.rate, speed, p.accel * dt)
+        self.along += self.rate * dt
         heading = math.radians(p.heading_deg)
         ux, uy = math.cos(heading), math.sin(heading)
         self.reference = (self.along * ux, self.along * uy)

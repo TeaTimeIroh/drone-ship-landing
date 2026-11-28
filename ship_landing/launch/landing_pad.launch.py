@@ -51,9 +51,12 @@ def generate_launch_description():
         ))
 
     # nav:=flow adds the file that switches GPS off and optical flow on.
+    # world:=ship adds the file that makes SITL's own ground flat, like the sea.
+    flow, ship = pkg / 'config' / 'optical_flow.parm', pkg / 'config' / 'ship.parm'
     defaults = PythonExpression([
-        "'", defaults_with(pkg / 'config' / 'optical_flow.parm'), "' if '",
-        LaunchConfiguration('nav'), "' == 'flow' else '", defaults_with(), "'"])
+        "{('flow', True): '", defaults_with(flow, ship), "', ('flow', False): '", defaults_with(flow),
+        "', ('gps', True): '", defaults_with(ship), "'}.get(('",
+        LaunchConfiguration('nav'), "', '", LaunchConfiguration('world'), "' == 'ship'), '", defaults_with(), "')"])
 
     gz_launch = str(pkg_ros_gz_sim / 'launch' / 'gz_sim.launch.py')
     gz_server = IncludeLaunchDescription(
@@ -86,7 +89,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('world', default_value='landing_pad',
-                              description='World to load: landing_pad or moving_pad.'),
+                              description='World to load: landing_pad, moving_pad or ship.'),
         DeclareLaunchArgument('gui', default_value='true', description='Open the Gazebo window.'),
         DeclareLaunchArgument('rviz', default_value='false', description='Open RViz.'),
         DeclareLaunchArgument('nav', default_value='gps',

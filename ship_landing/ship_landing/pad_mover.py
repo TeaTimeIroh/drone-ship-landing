@@ -24,7 +24,7 @@ PERIOD = 0.05            # s between commands
 MAX_STEP = 0.2           # s, longest time step the path is advanced by at once
 STATE_MAX_AGE = 1.0      # s, older joint positions than this are not used
 REPORT_EVERY = 5.0       # s between progress lines
-MAX_SPEED = 3.0          # m/s, a typing mistake should not launch the pad
+MAX_SPEED = 6.0          # m/s, a typing mistake should not launch the pad
 
 
 class PadMover(Node):

@@ -72,6 +72,24 @@
             "problemMatcher": []
         },
         {
+            "label": "Sim: start the boat (at rest, optical flow)",
+            "type": "shell",
+            "command": "if pgrep -f '[g]z sim' >/dev/null; then echo 'A simulator is already running. Run the task \"Sim: stop everything\" first.'; exit 1; fi; source '${workspaceFolder}/env.sh' && cd \"$ARDU_WS\" && ros2 launch ship_landing pad_sim.launch.py world:=ship nav:=flow view:=true",
+            "isBackground": true
+        },
+        {
+            "label": "Fly: hold over the boat's pad (boat at rest)",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && cd '${workspaceFolder}' && ros2 run ship_landing hold_over_pad --ros-args -p use_sim_time:=true -p pad_x:=0.0 -p pad_y:=0.0 -p pad_z:=0.0 -p hold_time:=20.0 -p output:=results/hold_ship && python3 ship_landing/tools/analyze_hold.py results/hold_ship",
+            "problemMatcher": []
+        },
+        {
+            "label": "Fly: take off from the boat, follow it and land on it",
+            "type": "shell",
+            "command": "source '${workspaceFolder}/env.sh' && cd '${workspaceFolder}' && ros2 run ship_landing land_by_leaning --ros-args -p use_sim_time:=true -p pad_x:=0.0 -p pad_y:=0.0 -p pad_z:=0.0 -p ship_speed:=${input:shipSpeed} -p output:=results/ship_landing",
+            "problemMatcher": []
+        },
+        {
             "label": "Fly: takeoff demo",
             "type": "shell",
             "command": "source '${workspaceFolder}/env.sh' && ros2 run ship_landing takeoff_demo --ros-args -p use_sim_time:=true"
@@ -120,6 +138,16 @@
             "label": "Measure: landing by leaning full run (3 batches of 10 landings, about an hour)",
             "type": "shell",
             "command": "LANDER=lean NAV=flow PATTERN=${input:padPattern} GUI=false bash '${workspaceFolder}/ship_landing/tools/run_moving_trials.sh' 3 10"
+        },
+        {
+            "label": "Measure: landing on the boat quick check (1 batch of 2 landings, starts its own simulator)",
+            "type": "shell",
+            "command": "WORLD=ship SHIP_SPEED=${input:shipSpeed} bash '${workspaceFolder}/ship_landing/tools/run_moving_trials.sh' 1 2"
+        },
+        {
+            "label": "Measure: landing on the boat full run (3 batches of 10 landings, about an hour)",
+            "type": "shell",
+            "command": "WORLD=ship SHIP_SPEED=${input:shipSpeed} GUI=false bash '${workspaceFolder}/ship_landing/tools/run_moving_trials.sh' 3 10"
         },
         {
             "label": "Measure: tilt check (static pad world must be running)",
@@ -175,6 +203,13 @@
         }
     ],
     "inputs": [
+        {
+            "id": "shipSpeed",
+            "type": "pickString",
+            "description": "Speed of the boat, m/s",
+            "options": ["2.0", "1.0", "3.0", "4.0"],
+            "default": "2.0"
+        },
         {
             "id": "navSource",
             "type": "pickString",

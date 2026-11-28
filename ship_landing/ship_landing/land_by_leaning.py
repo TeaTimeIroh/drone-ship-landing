@@ -14,6 +14,14 @@ moves. On the pad the throttle stick goes to the bottom and the motors are stopp
 Afterwards the pad is stopped and the true touchdown position is read from Gazebo.
 If the pad is lost for good on the way down, the node goes back to GUIDED, returns
 to where it took off and lands there.
+
+On the boat (pad_sim.launch.py world:=ship) add
+
+    -p pad_x:=0.0 -p pad_y:=0.0 -p pad_z:=0.0 -p ship_speed:=2.0
+
+The drone then takes off from the pad while the boat is at rest, holds over it, gets
+the boat under way at that speed, follows it for `cruise_time` seconds and lands. Where
+it "took off" is open water by then, so a landing given up ends in the sea.
 """
 import math
 from collections import deque
@@ -31,6 +39,7 @@ from ship_landing.levelling import heading
 DISARM_RETRY = 0.4          # s between requests to stop the motors
 LAND_MODE_AFTER = 10.0      # s on the pad after which the autopilot's own LAND mode is asked to finish
 PAD_STOP_TIME = 5.0         # s for the pad to come to rest before measuring
+PAD_ACCEL = 0.25            # m/s^2, how quickly pad_mover changes the pad's or the boat's speed
 PAD_HALF = 0.625            # m, half the pad's side
 
 
@@ -41,6 +50,13 @@ class LandByLeaning(HoldOverPad):
         super().__init__(name)
         self.lander = LeanLander(LandingParams(hold=self.hold.params))
         self.lander_state = self.lander.state
+        # The boat: 0 leaves whatever carries the pad alone; above 0 the node gets it under way itself.
+        self.ship_speed = float(self.declare_parameter('ship_speed', 0.0).value)
+        self.cruise_time = float(self.declare_parameter('cruise_time', 5.0).value)
+        self.stage = 'settle' if self.ship_speed > 0.0 else 'land'
+        self.stage_since = None
+        self.settled_since = None
+        self.landing_started = None
         self.contact_since = None
         self.next_disarm = None
         self.stop_delay = None
@@ -72,6 +88,8 @@ class LandByLeaning(HoldOverPad):
     # ---- steering: called twenty times a second while in the 'hold' phase -----------------
 
     def steer(self, now):
+        if self.stage != 'land':
+            return self.before_landing(now)
         lander = self.lander
         sticks = lander.update(now, self.track, heading(self.attitude))
         self.command = self.hold.command(self.track, heading(self.attitude)) if lander.state not in (
@@ -89,8 +107,35 @@ class LandByLeaning(HoldOverPad):
                                 'estimated_offset': tuple(self.track.position)}
         return (sticks.roll, sticks.pitch, sticks.throttle)
 
+    def before_landing(self, now):
+        """On the boat: hold over the pad, get the boat under way, follow it for a while."""
+        track = self.track
+        if track.age(now) > 1.0 or not track.ready:
+            self.command = None
+            return (0.0, 0.0, 0.0)
+        self.command = self.hold.command(track, heading(self.attitude))
+        if self.stage_since is None:
+            self.stage_since = now
+        if self.stage == 'settle':
+            steady = math.hypot(*track.position) < 0.3 and track.speed() < 0.3
+            if not steady:
+                self.settled_since = None
+            elif self.settled_since is None:
+                self.settled_since = now
+            elif now - self.settled_since >= 2.0 and self.set_pad_speed(self.ship_speed):
+                self.get_logger().info(
+                    f'Holding over the pad; the boat gets under way to {self.ship_speed:.1f} m/s | {self.describe()}')
+                self.stage, self.stage_since = 'depart', now
+        elif now - self.stage_since >= self.ship_speed / PAD_ACCEL + self.cruise_time:
+            self.get_logger().info(f'The boat is at speed; starting the landing | {self.describe()}')
+            self.stage, self.stage_since = 'land', now
+            self.landing_started = now
+        return (self.command.roll_stick, self.command.pitch_stick, 0.0)
+
     def landing_label(self):
-        return self.lander.state if self.phase == 'hold' else self.phase
+        if self.phase != 'hold':
+            return self.phase
+        return self.lander.state if self.stage == 'land' else self.stage
 
     def describe(self):
         track = self.track
@@ -103,14 +148,16 @@ class LandByLeaning(HoldOverPad):
     # ---- supervision: called ten times a second -------------------------------------------
 
     def watch(self, seconds, elapsed, now):
-        state = self.lander.state
-        if state == 'FAILED':
+        state = self.lander.state if self.stage == 'land' else self.stage
+        if self.stage != 'land' and self.track.age(seconds) > 3.0:
+            self.abort('The pad was not seen for 3 s while following the boat', seconds)
+        elif state == 'FAILED':
             self.abort(f'Landing given up: {self.lander.reason}', seconds)
         elif state == 'CONTACT':
             self.contact_since = seconds
             self.next_phase('contact', seconds)
-        elif elapsed > 180.0:
-            self.abort('No landing after 180 s', seconds)
+        elif elapsed > 240.0:
+            self.abort('No landing after 240 s', seconds)
         elif math.hypot(*self.track.position) > 8.0:
             self.abort('The pad is more than 8 m away', seconds)
         elif int(elapsed / 3.0) != int((elapsed - 0.1) / 3.0):
@@ -162,7 +209,7 @@ class LandByLeaning(HoldOverPad):
             if not moving and elapsed < 2.0:
                 return                                  # give pad_mover a moment to show up
             self.pad_stop_sent = True
-            self.measure_at = seconds + (PAD_STOP_TIME if moving else 1.0)
+            self.measure_at = seconds + (max(PAD_STOP_TIME, self.ship_speed / PAD_ACCEL + 3.0) if moving else 1.0)
             if moving:
                 self.get_logger().info('Stopping the pad to measure where the drone stands on it')
             return
@@ -174,7 +221,7 @@ class LandByLeaning(HoldOverPad):
         else:
             east = drone.x - (self.pad_origin[0] + self.pad_joints[0])
             north = drone.y - (self.pad_origin[1] + self.pad_joints[1])
-            on_pad = abs(east) < PAD_HALF and abs(north) < PAD_HALF and drone.z > 0.2
+            on_pad = abs(east) < PAD_HALF and abs(north) < PAD_HALF and drone.z - self.pad_z > 0.1
             self.result = {'east': east, 'north': north, 'on_pad': on_pad, 'drone_z': drone.z,
                            'drone_x': drone.x, 'drone_y': drone.y}
             self.get_logger().info(

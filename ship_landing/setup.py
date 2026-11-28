@@ -11,7 +11,7 @@ def model_files(model):
     return [
         (f'{share}/models/{model}', glob(f'models/{model}/model.*')),
         (f'{share}/models/{model}/materials/textures',
-            glob(f'models/{model}/materials/textures/*.png')),
+            glob(f'models/{model}/materials/textures/*.png') + glob(f'models/{model}/materials/textures/*.jpg')),
     ]
 
 
@@ -28,6 +28,9 @@ setup(
         (share + '/config', glob('config/*.parm')),
         *model_files('aruco_pad'),
         *model_files('moving_pad'),
+        *model_files('ship'),
+        (share + '/models/ship/meshes', glob('models/ship/meshes/*.dae')),
+        (share + '/models/ship', ['models/ship/ATTRIBUTION.md']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

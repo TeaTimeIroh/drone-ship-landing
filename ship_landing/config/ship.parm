@@ -1,0 +1,12 @@
+# The ship world: open water. Loaded by the launch files with world:=ship.
+
+# SITL has its own model of the ground, separate from Gazebo's: by default it looks up
+# the real terrain height at the drone's latitude and longitude. The simulated
+# rangefinder and optical flow sensor measure against that ground, not against anything
+# in the Gazebo world. Around SITL's start location the real ground falls away to the
+# east, so as the boat sailed east the simulated rangefinder saw the "ground" drop
+# beneath the sea, by roughly 0.9 m per 100 m. The autopilot uses that rangefinder for
+# the height of a GUIDED take-off and to follow the surface in ALT_HOLD, so each
+# take-off ended lower than the last and the fourth or fifth never reached its height.
+# With the terrain lookup off, SITL's ground is flat at the start height, like the sea.
+SIM_TERRAIN      0

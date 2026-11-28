@@ -1,0 +1,1 @@
+world=ship pattern=straight pad_speed=2.0 nav=flow lander=lean

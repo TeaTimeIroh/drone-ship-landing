@@ -12,6 +12,10 @@ does. Flying to the start point is done in GUIDED on the autopilot's own positio
 from the switch to ALT_HOLD onwards the camera is the only guide.
 
 A trial that does not end with the drone standing on the pad ends the batch.
+
+On the boat (world:=ship, with -p ship_speed:=2.0 and the pad at 0 0 0) there are no
+start points: each trial takes off from the pad with the boat at rest, holds over it,
+gets the boat under way, follows it for the trial's random wait and lands.
 """
 import csv
 import math
@@ -41,6 +45,8 @@ class LeanTrials(LandByLeaning):
         self.results = Path(self.declare_parameter('results', 'lean_trials.csv').value)
         self.pattern = str(self.declare_parameter('pattern', 'line').value)
         self.pad_speed = float(self.declare_parameter('pad_speed', 0.5).value)
+        if self.ship_speed > 0.0:
+            self.pad_speed = self.ship_speed
         self.radius_min = float(self.declare_parameter('start_radius_min', 1.5).value)
         self.radius_max = float(self.declare_parameter('start_radius_max', 4.0).value)
         self.max_wait = float(self.declare_parameter('max_wait', 12.0).value)
@@ -80,12 +86,20 @@ class LeanTrials(LandByLeaning):
         self.used_land_mode = self.pad_stop_sent = False
         self.abort_reason = None
         self.sticks_ok_since = None
-        self.phase, self.phase_started = 'position', None
+        self.phase, self.phase_started = ('acquire' if self.ship_speed > 0.0 else 'position'), None
+        self.stage = 'settle' if self.ship_speed > 0.0 else 'land'
+        self.stage_since = self.settled_since = None
+        self.cruise_time = self.wait
         self.start_local = None
         self.in_position_since = None
         self.pad_restarted = False
         self.landing_started = None
         self.detections = 0
+        if self.ship_speed > 0.0:
+            self.get_logger().info(
+                f'--- trial {self.trial}/{self.trials}: take off from the boat, follow it at '
+                f'{self.ship_speed:.1f} m/s for {self.wait:.1f} s, then land')
+            return
         self.get_logger().info(
             f'--- trial {self.trial}/{self.trials}: start point {self.start[0]:+.2f} m east, '
             f'{self.start[1]:+.2f} m north, then wait {self.wait:.1f} s')

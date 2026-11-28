@@ -4,11 +4,13 @@
     ros2 launch ship_landing pad_sim.launch.py view:=true            also open the camera view
     ros2 launch ship_landing pad_sim.launch.py world:=moving_pad     pad moving back and forth
     ros2 launch ship_landing pad_sim.launch.py world:=moving_pad pattern:=circle pad_speed:=1.0
+    ros2 launch ship_landing pad_sim.launch.py world:=ship nav:=flow  boat with the pad on its deck, at rest
 
 Runs landing_pad.launch.py (Gazebo, ArduPilot SITL, the ROS 2 bridge) and the marker
 detector, with simulation time already switched on for the detector. In the moving_pad
 world it also starts the node that drives the pad and the bridge that carries its
-commands to Gazebo.
+commands to Gazebo. In the ship world the same node drives the boat: straight ahead, and
+at rest until a flight node or `ros2 param set /pad_mover speed 2.0` gets it under way.
 """
 from pathlib import Path
 
@@ -25,11 +27,16 @@ from launch_ros.parameter_descriptions import ParameterValue
 PAD_EAST = '/model/moving_pad/joint/slide_east/cmd_vel'
 PAD_NORTH = '/model/moving_pad/joint/slide_north/cmd_vel'
 PAD_STATE = '/world/moving_pad/model/moving_pad/joint_state'
+# The boat has joints of the same names, and gets the same ROS names, so one set of nodes serves both.
+SHIP_EAST = '/model/ship/joint/slide_east/cmd_vel'
+SHIP_NORTH = '/model/ship/joint/slide_north/cmd_vel'
+SHIP_STATE = '/world/ship/model/ship/joint_state'
 
 
 def generate_launch_description():
     pkg = Path(get_package_share_directory('ship_landing'))
     pad_moves = IfCondition(PythonExpression(["'", LaunchConfiguration('world'), "' == 'moving_pad'"]))
+    is_ship = IfCondition(PythonExpression(["'", LaunchConfiguration('world'), "' == 'ship'"]))
 
     simulator = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(str(pkg / 'launch' / 'landing_pad.launch.py')),
@@ -83,9 +90,34 @@ def generate_launch_description():
         condition=pad_moves,
     )
 
+    ship_bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='pad_bridge',
+        arguments=[
+            SHIP_EAST + '@std_msgs/msg/Float64]gz.msgs.Double',
+            SHIP_NORTH + '@std_msgs/msg/Float64]gz.msgs.Double',
+            SHIP_STATE + '@sensor_msgs/msg/JointState[gz.msgs.Model',
+        ],
+        remappings=[
+            (SHIP_EAST, '/moving_pad/cmd_vel_east'),
+            (SHIP_NORTH, '/moving_pad/cmd_vel_north'),
+            (SHIP_STATE, '/moving_pad/joint_states'),
+        ],
+        output='screen',
+        condition=is_ship,
+    )
+    ship_mover = Node(
+        package='ship_landing',
+        executable='pad_mover',
+        parameters=[{'use_sim_time': True, 'pattern': 'straight', 'speed': 0.0}],
+        output='screen',
+        condition=is_ship,
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument('world', default_value='landing_pad',
-                              description='World to load: landing_pad or moving_pad.'),
+                              description='World to load: landing_pad, moving_pad or ship.'),
         DeclareLaunchArgument('gui', default_value='true', description='Open the Gazebo window.'),
         DeclareLaunchArgument('rviz', default_value='false', description='Open RViz.'),
         DeclareLaunchArgument('nav', default_value='gps',
@@ -101,4 +133,6 @@ def generate_launch_description():
         camera_view,
         pad_bridge,
         pad_mover,
+        ship_bridge,
+        ship_mover,
     ])
